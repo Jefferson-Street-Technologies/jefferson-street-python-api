@@ -1,14 +1,6 @@
 import os
 from typing import List, Optional, Dict, Any, Union
-from datetime import datetime
 import requests
-import json
-import pandas as pd
-from dataclasses import dataclass, asdict
-from tabulate import tabulate
-
-# For testing purposes
-SERVER = os.getenv("JEFFERSON_STREET_SERVER") or "https://api.jeffersonst.io"
 
 class ApiKeyNotSetError(Exception):
     pass
@@ -16,120 +8,34 @@ class ApiKeyNotSetError(Exception):
 class InvalidApiKeyError(Exception):
     pass
 
-def validate_api_key(api_key) -> None:
-    if api_key is None:
-        raise ApiKeyNotSetError("API key is not set")
-    if False: # Call API to validate
-        raise InvalidApiKeyError("Invalid API key")
-    return
-
-class BaseResponse:
-    """Base class for all API responses with common conversion methods"""
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert response to dictionary"""
-        return asdict(self)
-    
-    def to_json(self, indent: int = 2) -> str:
-        """Convert response to JSON string"""
-        def datetime_handler(obj):
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-        
-        return json.dumps(self.to_dict(), indent=indent, default=datetime_handler)
-    
-    def to_dataframe(self) -> pd.DataFrame:
-        """Convert response to pandas DataFrame"""
-        if hasattr(self, 'records'):
-            return pd.DataFrame([asdict(record) for record in self.records])
-        return pd.DataFrame([self.to_dict()])
-    
-    def to_table(self) -> str:
-        """Convert response to formatted table string"""
-        if hasattr(self, 'records'):
-            return tabulate(self.to_dataframe(), headers='keys', tablefmt='grid')
-        return tabulate(self.to_dataframe(), headers='keys', tablefmt='grid')
-
-@dataclass
-class MetricItem:
-    slug: str
-    name: str
-    frequencies: List[str]
-    units: List[str]
-    last_updated: datetime
-
-@dataclass
-class MetricResponse(BaseResponse):
-    records: List[MetricItem]
-    limit: int
-    offset: int
-
-@dataclass
-class SeriesDimensionItem:
-    geography: Optional[str]
-    secondary_geography: Optional[str]
-    industry: Optional[str]
-    commodity: Optional[str]
-
-@dataclass
-class SeriesDescriptionItem:
-    id: str
-    source: str
-    frequency: str
-    unit: str
-    last_updated: datetime
-    dimensions: SeriesDimensionItem
-
-@dataclass
-class SeriesResponse(BaseResponse):
-    records: List[SeriesDescriptionItem]
-    limit: int
-    offset: int
-
-@dataclass
-class SeriesObservationItem:
-    id: str
-    observation_date: datetime
-    release_date: datetime
-    value: float
-
-@dataclass
-class ObservationResponse(BaseResponse):
-    records: List[SeriesObservationItem]
-    limit: int
-    offset: int
-
-@dataclass
-class PriceItem:
-    date: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: int
-
-@dataclass
-class PriceResponse(BaseResponse):
-    records: List[PriceItem]
-    limit: int
-    offset: int
+class InvalidInputError(Exception):
+    pass
 
 class JeffersonStreetClient:
-    def __init__(self, api_key: Optional[str] = None, base_url: str = SERVER):
+    # For testing purposes
+    base_url = os.getenv("JEFFERSON_STREET_SERVER") or "https://api.jeffersonst.io"
+
+    def __init__(self, api_key: Optional[str] = None):
         if api_key is None:
             from dotenv import load_dotenv
             load_dotenv()
             api_key = os.getenv("JEFFERSON_STREET_API_KEY")
+        self.api_key = api_key
+        self.session = requests.Session()
+        self.session.params = {"api-key": api_key}
+
         try:
-            validate_api_key(api_key)
+            self._validate_api_key(api_key)
         except Exception as e:
             raise e
 
-        self.api_key = api_key
-        self.base_url = base_url
-        self.session = requests.Session()
-        self.session.params = {"api-key": api_key}
+    def _validate_api_key(self, api_key) -> None:
+        if api_key is None:
+            raise ApiKeyNotSetError("API key is not set")
+        heartbeat = self._make_request("heartbeat")
+        if heartbeat["status"] != "ok":
+            raise InvalidApiKeyError("Invalid API key")
+        return
 
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/{endpoint}"
@@ -142,8 +48,8 @@ class JeffersonStreetClient:
         limit: int = 10000,
         offset: int = 0,
         order_by: str = "last_updated",
-        sort_order: str = "desc"
-    ) -> MetricResponse:
+        sort_order: str = "desc",
+    ) -> Dict[str, Any]:
         """Get available metrics.
         
         Args:
@@ -155,7 +61,8 @@ class JeffersonStreetClient:
         Returns:
             MetricResponse containing list of available metrics
         """
-        return self._make_request("metric", {"limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+        response = self._make_request("metric", {"limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+        return response["records"]
 
     def get_metric_series(
         self,
@@ -164,7 +71,7 @@ class JeffersonStreetClient:
         offset: int = 0,
         order_by: str = "last_updated",
         sort_order: str = "asc"
-    ) -> SeriesResponse:
+    ) -> Dict[str, Any]:
         """Get series for a specific metric.
         
         Args:
@@ -177,7 +84,11 @@ class JeffersonStreetClient:
         Returns:
             SeriesResponse containing list of series for the metric
         """
-        pass
+        try:
+            response = self._make_request("metric/series", {"metric": metric, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+        except requests.exceptions.HTTPError as e:
+            raise InvalidInputError(f"Invalid input: {e}")
+        return response["records"]
 
     def get_metric_observations(
         self,
@@ -186,8 +97,11 @@ class JeffersonStreetClient:
         limit: int = 10000,
         offset: int = 0,
         order_by: str = "id",
-        sort_order: str = "asc"
-    ) -> ObservationResponse:
+        sort_order: str = "asc",
+        expanded: bool = False,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Get observations for one or more series.
         
         Args:
@@ -201,7 +115,11 @@ class JeffersonStreetClient:
         Returns:
             ObservationResponse containing list of observations
         """
-        pass
+        try:
+            response = self._make_request("metric/series", {"metric": metric, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+        except requests.exceptions.HTTPError as e:
+            raise InvalidInputError(f"Invalid input: {e}")
+        return response["records"]
 
     def get_tickers(
         self,
@@ -253,7 +171,7 @@ class JeffersonStreetClient:
         limit: int = 10000,
         offset: int = 0,
         sort_order: str = "asc"
-    ) -> PriceResponse:
+    ) -> Dict[str, Any]:
         """Get historical prices for a ticker.
         
         Args:
@@ -268,3 +186,10 @@ class JeffersonStreetClient:
             PriceResponse containing list of price records
         """
         pass
+
+    def get_countries(self, limit=10000, offset=0, sort_order='asc'):
+        try:
+            response = self._make_request("reference/geo/countries", {"limit": limit, "offset": offset, "sort_order": sort_order})
+        except requests.exceptions.HTTPError as e:
+            raise InvalidInputError(f"Invalid input: {e}")
+        return response["records"]
