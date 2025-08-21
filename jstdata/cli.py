@@ -1,7 +1,13 @@
+import os
 import click
 from .client import JeffersonStreetClient
-
 from .utils import date_handler, format_and_print
+
+api_key = os.getenv("JEFFERSON_STREET_API_KEY")
+if api_key is None:
+    raise Exception("Please set the JEFFERSON_STREET_API_KEY environment variable")
+
+client = JeffersonStreetClient(api_key)
 
 def common_params(f):
     f = click.option("--limit", default=10000, help="Maximum number of records to return (default: 10000)")(f)
@@ -27,7 +33,6 @@ def query():
 @click.option("--sort_order", default="desc", help="Sort order (asc or desc, default: desc)")
 @click.option("--order_by", default="last_updated", help="Column to order by (default: last_updated)")
 def list_metrics(limit, offset, sort_order, order_by, format):
-    client = JeffersonStreetClient()
     metrics = client.get_metrics(limit, offset, order_by, sort_order)
     format_and_print(metrics, format)
 
@@ -37,7 +42,6 @@ def list_metrics(limit, offset, sort_order, order_by, format):
 @click.option("--sort_order", default="desc", help="Sort order (asc or desc, default: desc)")
 @click.option("--order_by", default="last_updated", help="Column to order by (default: last_updated)")
 def list_series(metric, limit, offset, sort_order, order_by, format):
-    client = JeffersonStreetClient()
     series = client.get_metric_series(metric, limit, offset, order_by, sort_order)
     format_and_print(series, format)
 
@@ -50,7 +54,6 @@ def list_series(metric, limit, offset, sort_order, order_by, format):
 @click.option("--start", default=None, help="Start period. Valid formats: YYYY-MM-DD, YYYY-MM, YYYY, unix timestamp")
 @click.option("--end", default=None, help="End period. Valid formats: YYYY-MM-DD, YYYY-MM, YYYY, unix timestamp")
 def get_observations(series, observation_type, limit, offset, order_by, sort_order, format, start=None, end=None):
-    client = JeffersonStreetClient()
     start_date = date_handler(start) if start else None
     end_date = date_handler(end) if end else None
     observations = client.get_metric_observations(series, observation_type, limit, offset, order_by, sort_order, False, start_date, end_date)
@@ -63,7 +66,6 @@ def search_by_concept():
 @common_params
 @show.command('countries')
 def get_countries(format, limit, offset):
-    client = JeffersonStreetClient()
     response = client.get_countries(limit, offset)
     format_and_print(response, format)
 

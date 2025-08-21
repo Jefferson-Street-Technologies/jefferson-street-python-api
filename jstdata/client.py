@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 import requests
 
 class ApiKeyNotSetError(Exception):
@@ -16,10 +16,6 @@ class JeffersonStreetClient:
     base_url = os.getenv("JEFFERSON_STREET_SERVER") or "https://api.jeffersonst.io"
 
     def __init__(self, api_key: Optional[str] = None):
-        if api_key is None:
-            from dotenv import load_dotenv
-            load_dotenv()
-            api_key = os.getenv("JEFFERSON_STREET_API_KEY")
         self.api_key = api_key
         self.session = requests.Session()
         self.session.params = {"api-key": api_key}
