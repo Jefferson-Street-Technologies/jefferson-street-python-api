@@ -20,23 +20,42 @@ def common_params(f):
 def cli():
     pass
 
-@cli.group("ls")
-def show():
+@cli.group()
+def metric():
+    pass
+
+@cli.group()
+def entities():
     pass
 
 @cli.group()
 def query():
     pass
 
-@show.command("metrics")
+@metric.command("ls")
 @common_params
 @click.option("--sort_order", default="desc", help="Sort order (asc or desc, default: desc)")
 @click.option("--order_by", default="last_updated", help="Column to order by (default: last_updated)")
-def list_metrics(limit, offset, sort_order, order_by, format):
+@click.option('--expanded', default=False, help='Return expanded metrics')
+def list_metrics(limit, offset, sort_order, order_by, format, expanded):
     metrics = client.get_metrics(limit, offset, order_by, sort_order)
-    format_and_print(metrics, format)
+    cols = ['slug', 'name', 'frequency', 'unit', 'last_updated']
+    if expanded:
+        format_and_print(metrics, format)
+    else:
+        condensed_metrics = [
+            {
+                'slug': m['slug']
+            }
+            for m in metrics
+        ]
+        format_and_print(condensed_metrics, format)
 
-@show.command("series")
+@metric.command("show")
+def show_metric():
+    pass
+
+@entities.command("list")
 @common_params
 @click.argument("metric", required=True)
 @click.option("--sort_order", default="desc", help="Sort order (asc or desc, default: desc)")
@@ -45,7 +64,7 @@ def list_series(metric, limit, offset, sort_order, order_by, format):
     series = client.get_metric_series(metric, limit, offset, order_by, sort_order)
     format_and_print(series, format)
 
-@query.command("series")
+@query.command("list")
 @common_params
 @click.argument("series", required=True, nargs=-1)
 @click.option("--observation_type", default="latest", help="Type of observations (earliest or latest, default: latest)")
@@ -59,12 +78,17 @@ def get_observations(series, observation_type, limit, offset, order_by, sort_ord
     observations = client.get_metric_observations(series, observation_type, limit, offset, order_by, sort_order, False, start_date, end_date)
     format_and_print(observations, format)
 
-@query.command("concept")
-def search_by_concept():
+@entities.command("ls")
+def get_concept_types():
     pass
 
+@entities.group("country")
+def country():
+    pass
+
+
 @common_params
-@show.command('countries')
+@country.command('ls')
 def get_countries(format, limit, offset):
     response = client.get_countries(limit, offset)
     format_and_print(response, format)
