@@ -27,4 +27,8 @@ def format_and_print(response_data, format):
     elif format == "csv":
         click.echo(df_to_csv_string(pd.DataFrame(response_data)))
     elif format == "pretty":
+        if len(response_data) == 1:
+            response_data = [(k, v) for k, v in response_data[0].items()]
+            click.echo(tabulate(response_data, headers=["key", "value"], tablefmt="pretty"))
+            return
         click.echo(tabulate(response_data, headers="keys", tablefmt="pretty"))

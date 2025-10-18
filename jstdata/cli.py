@@ -52,8 +52,11 @@ def list_metrics(limit, offset, sort_order, order_by, format, expanded):
         format_and_print(condensed_metrics, format)
 
 @metric.command("show")
-def show_metric():
-    pass
+@click.argument("metric", required=True)
+@click.option("--format", default="pretty", help="Output format. Valid formats are: json, csv, pretty.")
+def show_metric(metric, format):
+    metric = client.get_metrics(metric)
+    format_and_print(metric, format)
 
 @entities.command("list")
 @common_params

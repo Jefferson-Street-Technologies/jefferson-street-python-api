@@ -41,6 +41,7 @@ class JeffersonStreetClient:
 
     def get_metrics(
         self,
+        metric: str = None,
         limit: int = 10000,
         offset: int = 0,
         order_by: str = "last_updated",
@@ -49,6 +50,7 @@ class JeffersonStreetClient:
         """Get available metrics.
         
         Args:
+            metric: The metric's slug. If empty, all metrics are returned
             limit: Maximum number of records to return (default: 10000)
             offset: Number of records to skip (default: 0)
             order_by: Column to order by (default: "last_updated")
@@ -57,7 +59,7 @@ class JeffersonStreetClient:
         Returns:
             MetricResponse containing list of available metrics
         """
-        response = self._make_request("metric", {"limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+        response = self._make_request("metric", {"metric": metric, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
         return response["records"]
 
     def get_metric_series(
