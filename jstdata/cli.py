@@ -38,7 +38,7 @@ def query():
 @click.option("--order_by", default="last_updated", help="Column to order by (default: last_updated)")
 @click.option('--expanded', default=False, help='Return expanded metrics')
 def list_metrics(limit, offset, sort_order, order_by, format, expanded):
-    metrics = client.get_metrics(limit, offset, order_by, sort_order)
+    metrics = client.get_metrics(None, limit, offset, order_by, sort_order)
     cols = ['slug', 'name', 'frequency', 'unit', 'last_updated']
     if expanded:
         format_and_print(metrics, format)
@@ -57,6 +57,13 @@ def list_metrics(limit, offset, sort_order, order_by, format, expanded):
 def show_metric(metric, format):
     metric = client.get_metrics(metric)
     format_and_print(metric, format)
+
+@metric.command("dimensions")
+@click.argument("metric", required=True)
+@click.option("--format", default="pretty", help="Output format. Valid formats are: json, csv, pretty.")
+def show_metric_dimensions(metric, format):
+    dimensions = client.get_metric_dimensions(metric)
+    format_and_print(dimensions, format)
 
 @entities.command("list")
 @common_params

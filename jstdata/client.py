@@ -41,7 +41,7 @@ class JeffersonStreetClient:
 
     def get_metrics(
         self,
-        metric: str = None,
+        metric: Optional[str] = None,
         limit: int = 10000,
         offset: int = 0,
         order_by: str = "last_updated",
@@ -60,6 +60,13 @@ class JeffersonStreetClient:
             MetricResponse containing list of available metrics
         """
         response = self._make_request("metric", {"metric": metric, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+        return response["records"]
+
+    def get_metric_dimensions(self, metric: str) -> Dict[str, Any]:
+        try:
+            response = self._make_request("metric/dimensions", {"metric": metric})
+        except requests.exceptions.HTTPError as e:
+            raise InvalidInputError(f"Invalid input: {e}")
         return response["records"]
 
     def get_metric_series(
