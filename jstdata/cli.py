@@ -10,7 +10,7 @@ if api_key is None:
 client = JeffersonStreetClient(api_key)
 
 def common_params(f):
-    f = click.option("--limit", default=10000, help="Maximum number of records to return (default: 10000)")(f)
+    f = click.option("--limit", default=100, help="Maximum number of records to return (default: 10000)")(f)
     f = click.option("--offset", default=0, help="Number of records to skip (default: 0)")(f)
     f = click.option("--format", default="pretty", help="Output format. Valid formats are: json, csv, pretty.")(f)
     return f
@@ -30,6 +30,11 @@ def entities():
 
 @cli.group()
 def query():
+    pass
+
+@entities.command("types")
+def list_entity_types():
+    # TODO: return taxonomies
     pass
 
 @metric.command("ls")
@@ -65,7 +70,7 @@ def show_metric_dimensions(metric, format):
     dimensions = client.get_metric_dimensions(metric)
     format_and_print(dimensions, format)
 
-@entities.command("list")
+@entities.command("list-series")
 @common_params
 @click.argument("metric", required=True)
 @click.option("--sort_order", default="desc", help="Sort order (asc or desc, default: desc)")
@@ -74,7 +79,7 @@ def list_series(metric, limit, offset, sort_order, order_by, format):
     series = client.get_metric_series(metric, limit, offset, order_by, sort_order)
     format_and_print(series, format)
 
-@query.command("list")
+@query.command("by-id")
 @common_params
 @click.argument("series", required=True, nargs=-1)
 @click.option("--observation_type", default="latest", help="Type of observations (earliest or latest, default: latest)")
@@ -88,17 +93,8 @@ def get_observations(series, observation_type, limit, offset, order_by, sort_ord
     observations = client.get_metric_observations(series, observation_type, limit, offset, order_by, sort_order, False, start_date, end_date)
     format_and_print(observations, format)
 
-@entities.command("ls")
-def get_concept_types():
-    pass
-
-@entities.group("country")
-def country():
-    pass
-
-
 @common_params
-@country.command('ls')
+@entities.command('show')
 def get_countries(format, limit, offset):
     response = client.get_countries(limit, offset)
     format_and_print(response, format)
