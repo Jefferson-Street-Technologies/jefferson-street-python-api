@@ -1,6 +1,11 @@
 import os
 from typing import List, Optional, Dict, Any
 import requests
+from dataclasses import dataclass
+from enum import Enum
+from collections import namedtuple
+
+EntityType = namedtuple("EntityType", ["name", "slug", "classification"])
 
 class ApiKeyNotSetError(Exception):
     pass
@@ -16,24 +21,31 @@ class JeffersonStreetClient:
     base_url = os.getenv("JEFFERSON_STREET_SERVER") or "https://api.jeffersonst.io"
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key
+        self._api_key = api_key
         self.session = requests.Session()
         self.session.params = {"api-key": api_key}
 
-        try:
-            self._validate_api_key(api_key)
-        except Exception as e:
-            raise e
+        self._api_key_is_valid = False
+
+    @property
+    def api_key(self):
+        return self._api_key
 
     def _validate_api_key(self, api_key) -> None:
         if api_key is None:
             raise ApiKeyNotSetError("API key is not set")
-        heartbeat = self._make_request("heartbeat")
+
+        url = f"{self.base_url}/heartbeat"
+        heartbeat = self.session.get(url).json()
         if heartbeat["status"] != "ok":
             raise InvalidApiKeyError("Invalid API key")
+        self._api_key_is_valid = True
         return
 
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self._api_key_is_valid:
+            self._validate_api_key(self.api_key)
+
         url = f"{self.base_url}/{endpoint}"
         response = self.session.get(url, params=params)
         response.raise_for_status()
@@ -121,10 +133,65 @@ class JeffersonStreetClient:
             ObservationResponse containing list of observations
         """
         try:
-            response = self._make_request("metric/series", {"metric": metric, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+            response = self._make_request("metric/series", {"series": series, "observation_type": observation_type, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
         except requests.exceptions.HTTPError as e:
             raise InvalidInputError(f"Invalid input: {e}")
         return response["records"]
+
+    def get_entity_groups(self) -> Dict[str, Any]:
+        """Get available entity types.
+        
+        Returns:
+            Dictionary containing list of available entity types
+        """
+        try:
+            response = self._make_request("entities/types")
+        except requests.exceptions.HTTPError as e:
+            raise InvalidInputError(f"Invalid input: {e}")
+        return response["records"]
+
+    def get_entities(
+        self,
+        entity_group: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 10000,
+        sort_order: str = "asc"
+    ) -> Dict[str, Any]:
+        """Get available entities.
+        Args:
+            offset: Number of records to skip (default: 0)
+            limit: Maximum number of records to return (default: 10000)
+            sort_order: Sort order ("asc" or "desc", default: "asc")
+            
+        Returns:
+            Dictionary containing list of available entities
+        """
+        response = self._make_request(f"entities/{entity_group}", {"offset": offset, "limit": limit, "sort_order": sort_order})
+        return response['records']
+
+    def get_entity_metrics(
+        self,
+        entity_group: str,
+        entity: Optional[str] = None,
+        limit: int = 10000,
+        offset: int = 0,
+        order_by: str = "last_updated",
+        sort_order: str = "asc"
+    ) -> Dict[str, Any]:
+        """Get metrics for a specific entity.
+        
+        Args:
+            entity: The entity's slug
+            limit: Maximum number of records to return (default: 10000)
+            offset: Number of records to skip (default: 0)
+            order_by: Column to order by (default: "last_updated")
+            sort_order: Sort order ("asc" or "desc", default: "asc")
+            
+        Returns:
+            MetricResponse containing list of metrics for the entity
+        """
+        response = self._make_request(f"entities/{entity_group}/metrics", {"limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order, "entity": entity})
+        return response['records']
 
     def get_tickers(
         self,

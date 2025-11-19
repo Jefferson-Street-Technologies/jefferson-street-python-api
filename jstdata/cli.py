@@ -32,10 +32,26 @@ def entities():
 def query():
     pass
 
-@entities.command("types")
-def list_entity_types():
-    # TODO: return taxonomies
-    pass
+@entities.command("groups")
+@click.option("--format", default="pretty", help="Output format. Valid formats are: json, csv, pretty.")
+def list_entity_groups(format):
+    entity_groups = client.get_entity_groups()
+    format_and_print(entity_groups, format)
+
+@entities.command("values")
+@click.argument("entity_group", required=True)
+@common_params
+def list_entities(entity_group, limit, format, offset):
+    results = client.get_entities(entity_group, offset, limit)
+    format_and_print(results, format)
+
+@entities.command("links")
+@click.argument("entity_group", required=True)
+@click.argument("entity", required=False)
+@common_params
+def get_entity_links(entity_group, entity, limit, format, offset):
+    results = client.get_entity_metrics(entity_group, entity,  limit, offset)
+    format_and_print(results, format)
 
 @metric.command("ls")
 @common_params
