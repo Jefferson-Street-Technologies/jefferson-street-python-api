@@ -81,32 +81,6 @@ class JeffersonStreetClient:
             raise InvalidInputError(f"Invalid input: {e}")
         return response["records"]
 
-    def get_metric_series(
-        self,
-        metric: str,
-        limit: int = 10000,
-        offset: int = 0,
-        order_by: str = "last_updated",
-        sort_order: str = "asc"
-    ) -> Dict[str, Any]:
-        """Get series for a specific metric.
-        
-        Args:
-            metric: The metric's slug
-            limit: Maximum number of records to return (default: 10000)
-            offset: Number of records to skip (default: 0)
-            order_by: Column to order by (default: "last_updated")
-            sort_order: Sort order ("asc" or "desc", default: "asc")
-            
-        Returns:
-            SeriesResponse containing list of series for the metric
-        """
-        try:
-            response = self._make_request("metric/series", {"metric": metric, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
-        except requests.exceptions.HTTPError as e:
-            raise InvalidInputError(f"Invalid input: {e}")
-        return response["records"]
-
     def get_metric_observations(
         self,
         series: List[str],
@@ -145,7 +119,7 @@ class JeffersonStreetClient:
             Dictionary containing list of available entity types
         """
         try:
-            response = self._make_request("entities/types")
+            response = self._make_request("entity/groups")
         except requests.exceptions.HTTPError as e:
             raise InvalidInputError(f"Invalid input: {e}")
         return response["records"]
@@ -166,7 +140,7 @@ class JeffersonStreetClient:
         Returns:
             Dictionary containing list of available entities
         """
-        response = self._make_request(f"entities/{entity_group}", {"offset": offset, "limit": limit, "sort_order": sort_order})
+        response = self._make_request(f"entity/{entity_group}", {"offset": offset, "limit": limit, "sort_order": sort_order})
         return response['records']
 
     def get_entity_metrics(
@@ -190,78 +164,62 @@ class JeffersonStreetClient:
         Returns:
             MetricResponse containing list of metrics for the entity
         """
-        response = self._make_request(f"entities/{entity_group}/metrics", {"limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order, "entity": entity})
+        response = self._make_request(f"entity/{entity_group}/metrics", {"limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order, "entity": entity})
         return response['records']
 
-    def get_tickers(
-        self,
-        offset: int = 0,
-        limit: int = 10000,
-        sort_order: str = "asc"
-    ) -> Dict[str, Any]:
-        """Get available tickers.
-        
-        Args:
-            offset: Number of records to skip (default: 0)
-            limit: Maximum number of records to return (default: 10000)
-            sort_order: Sort order ("asc" or "desc", default: "asc")
-            
-        Returns:
-            Dictionary containing list of available tickers
-        """
-        pass
 
-    def get_financials(
+    def query(
         self,
-        ticker: str,
-        metrics: Optional[str] = None,
-        start_date: str = "2020-01-01",
-        end_date: str = "2025-05-13",
-        limit: int = 10000,
-        offset: int = 0
-    ) -> Dict[str, Any]:
-        """Get historical financials for a company.
-        
-        Args:
-            ticker: The ticker symbol
-            metrics: Comma-separated list of metrics (optional)
-            start_date: Earliest filing date (YYYY-MM-DD, default: "2020-01-01")
-            end_date: Latest filing date (YYYY-MM-DD, default: "2025-05-13")
-            limit: Maximum number of records to return (default: 10000)
-            offset: Number of records to skip (default: 0)
-            
-        Returns:
-            Dictionary containing financial data
-        """
-        pass
-
-    def get_prices(
-        self,
-        ticker: str,
+        by: str,
+        id: str,
         start_date: str,
         end_date: str,
-        limit: int = 10000,
+        limit: int = 100,
         offset: int = 0,
+        order_by: str = "release_date",
         sort_order: str = "asc"
     ) -> Dict[str, Any]:
-        """Get historical prices for a ticker.
+        """Query by metric.
         
         Args:
-            ticker: The ticker symbol
+            by: The type of query to perform (either "metric" or "entity")
+            id: The metric or entity's id/slug
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
-            limit: Maximum number of records to return (default: 10000)
+            limit: Maximum number of records to return (default: 100)
             offset: Number of records to skip (default: 0)
+            order_by: Column to order by (either "release_date" or "series_label", default: "release_date")
+            sort_order: Sort order ("asc" or "desc", default: "desc")
+            
+        Returns:
+            QueryResponse containing list of query results
+        """
+        if by not in ['metric', 'entity']:
+            raise InvalidInputError(f"Invalid input: {by}")
+        if order_by not in ['release_date', 'series_label']:
+            raise InvalidInputError(f"Invalid input: {order_by}")
+        if sort_order not in ['asc', 'desc']:
+            raise InvalidInputError(f"Invalid input: {sort_order}")
+
+        response = self._make_request(f"query/{by}/{id}", {"start_date": start_date, "end_date": end_date, "limit": limit, "offset": offset, 'sort_order': sort_order, 'order_by': order_by})
+        return response['records']
+
+    def search_for_entity(
+        self,
+        query: str,
+        limit: int = 3,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Search for an entity.
+        
+        Args:
+            query: The query to search for
+            offset: Number of records to skip (default: 0)
+            limit: Maximum number of records to return (default: 10000)
             sort_order: Sort order ("asc" or "desc", default: "asc")
             
         Returns:
-            PriceResponse containing list of price records
+            SearchResponse containing list of search results
         """
-        pass
-
-    def get_countries(self, limit=10000, offset=0, sort_order='asc'):
-        try:
-            response = self._make_request("reference/geo/countries", {"limit": limit, "offset": offset, "sort_order": sort_order})
-        except requests.exceptions.HTTPError as e:
-            raise InvalidInputError(f"Invalid input: {e}")
-        return response["records"]
+        response = self._make_request(f"search/entity", {"query": query, "offset": offset, "limit": limit})
+        return response['records']
