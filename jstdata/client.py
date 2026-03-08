@@ -54,7 +54,7 @@ class JeffersonStreetClient:
     def get_metrics(
         self,
         metric: Optional[str] = None,
-        limit: int = 10000,
+        limit: int = 100,
         offset: int = 0,
         order_by: str = "last_updated",
         sort_order: str = "desc",
@@ -76,38 +76,7 @@ class JeffersonStreetClient:
 
     def get_metric_dimensions(self, metric: str) -> Dict[str, Any]:
         try:
-            response = self._make_request("metric/dimensions", {"metric": metric})
-        except requests.exceptions.HTTPError as e:
-            raise InvalidInputError(f"Invalid input: {e}")
-        return response["records"]
-
-    def get_metric_observations(
-        self,
-        series: List[str],
-        observation_type: str = "latest",
-        limit: int = 10000,
-        offset: int = 0,
-        order_by: str = "id",
-        sort_order: str = "asc",
-        expanded: bool = False,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Get observations for one or more series.
-        
-        Args:
-            series: List of series IDs
-            observation_type: Type of observations ("earliest" or "latest", default: "latest")
-            limit: Maximum number of records to return (default: 10000)
-            offset: Number of records to skip (default: 0)
-            order_by: Column to order by (default: "id")
-            sort_order: Sort order ("asc" or "desc", default: "asc")
-            
-        Returns:
-            ObservationResponse containing list of observations
-        """
-        try:
-            response = self._make_request("metric/series", {"series": series, "observation_type": observation_type, "limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order})
+            response = self._make_request(f"metric/{metric}/entities")
         except requests.exceptions.HTTPError as e:
             raise InvalidInputError(f"Invalid input: {e}")
         return response["records"]
@@ -145,11 +114,9 @@ class JeffersonStreetClient:
 
     def get_entity_metrics(
         self,
-        entity_group: str,
         entity: Optional[str] = None,
         limit: int = 10000,
         offset: int = 0,
-        order_by: str = "last_updated",
         sort_order: str = "asc"
     ) -> Dict[str, Any]:
         """Get metrics for a specific entity.
@@ -164,7 +131,7 @@ class JeffersonStreetClient:
         Returns:
             MetricResponse containing list of metrics for the entity
         """
-        response = self._make_request(f"entity/{entity_group}/metrics", {"limit": limit, "offset": offset, "order_by": order_by, "sort_order": sort_order, "entity": entity})
+        response = self._make_request(f"entity/{entity}/metrics", {"limit": limit, "offset": offset, "sort_order": sort_order})
         return response['records']
 
 
@@ -177,7 +144,8 @@ class JeffersonStreetClient:
         limit: int = 100,
         offset: int = 0,
         order_by: str = "release_date",
-        sort_order: str = "asc"
+        sort_order: str = "asc",
+        entity_filter: Optional[list[str]] = None
     ) -> Dict[str, Any]:
         """Query by metric.
         
@@ -200,8 +168,10 @@ class JeffersonStreetClient:
             raise InvalidInputError(f"Invalid input: {order_by}")
         if sort_order not in ['asc', 'desc']:
             raise InvalidInputError(f"Invalid input: {sort_order}")
-
-        response = self._make_request(f"query/{by}/{id}", {"start_date": start_date, "end_date": end_date, "limit": limit, "offset": offset, 'sort_order': sort_order, 'order_by': order_by})
+        params = {"start_date": start_date, "end_date": end_date, "limit": limit, "offset": offset, 'sort_order': sort_order, 'order_by': order_by}
+        if entity_filter is not None:
+            params['entities'] = entity_filter
+        response = self._make_request(f"query/{by}/{id}",params)
         return response['records']
 
     def search_for_entity(

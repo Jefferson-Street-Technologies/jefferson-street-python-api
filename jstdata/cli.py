@@ -46,11 +46,10 @@ def list_entities(entity_group, limit, format, offset):
     format_and_print(results, format)
 
 @entity.command("metrics")
-@click.argument("entity_group", required=True)
-@click.argument("entity", required=False)
+@click.argument("entity", required=True)
 @common_params
-def get_entity_links(entity_group, entity, limit, format, offset):
-    results = client.get_entity_metrics(entity_group, entity,  limit, offset)
+def get_entity_links( entity, limit, format, offset):
+    results = client.get_entity_metrics(entity,  limit, offset)
     format_and_print(results, format)
 
 @metric.command("ls")
