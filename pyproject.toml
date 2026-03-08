@@ -4,9 +4,27 @@ version = "0.1.0"
 description = "A Python interface to the Jefferson Street REST API."
 authors = ["Mahfuj Ahbab"]
 readme = "README.md"
+license = "MIT"
+homepage = "https://github.com/mahfuj/python_api"
+repository = "https://github.com/mahfuj/python_api"
+keywords = ["api", "cli", "data", "jefferson street"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 
 [tool.poetry.dependencies]
 python = "^3.10"
+click = "^8.2.1"
+pandas = "^2.3.1"
+tabulate = "^0.9.0"
+
+[tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
 requests-mock = "^1.12.1"
 pytest-cov = "^6.1.1"
@@ -14,14 +32,10 @@ black = "^25.1.0"
 isort = "^6.0.1"
 flake8 = "^7.2.0"
 mypy = "^1.15.0"
-click = "^8.2.1"
 
-
-pandas = "^2.3.1"
-tabulate = "^0.9.0"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-jstdata = "jstdata.cli:cli"
+jst = "jstdata.cli:cli"
