@@ -6,13 +6,11 @@ import click
 from .client import ApiKeyNotSetError, JeffersonStreetClient
 from .utils import common_params, format_and_print
 
-api_key = os.getenv("JEFFERSON_STREET_API_KEY")
-if api_key is None:
-    raise click.Abort(
-        "Please set the JEFFERSON_STREET_API_KEY environment variable to a valid API key."
-    )
+try:
+    client = JeffersonStreetClient()
+except ApiKeyNotSetError as e:
+    raise click.Abort('hello')
 
-client = JeffersonStreetClient(api_key)
 
 
 @click.group()
@@ -138,7 +136,6 @@ def show_metric_dimensions(metric, format):
 @click.option(
     "--sort_order", default="desc", help="Sort order (asc or desc, default: desc)"
 )
-@click.option("--order_by", default="id", help="Column to order by (default: id)")
 @click.option(
     "--start_date",
     default=None,
@@ -149,13 +146,19 @@ def show_metric_dimensions(metric, format):
     default=None,
     help="End period. Valid formats: YYYY-MM-DD, YYYY-MM, YYYY, unix timestamp",
 )
+@click.option(
+    "--entity_filter",
+    default=None,
+    help="List of comma-separated entity slugs to filter by",
+)
 def get_observations_by_metric(
-    metric, sort_order, order_by, start_date, end_date, limit, offset, format
+    metric, sort_order, start_date, end_date, limit, offset, format, entity_filter
 ):
     """
     Retrieve observations for a specific metric.
     """
-    observations = client.query("metric", metric, start_date, end_date, limit, offset)
+    entity_filter_list = entity_filter.split(",") if entity_filter else None
+    observations = client.query("metric", metric, start_date, end_date, limit, offset, sort_order=sort_order, entity_filter=entity_filter_list)
     format_and_print(observations, format)
 
 
@@ -188,7 +191,7 @@ def get_observations_by_entity(
 
 @entity.command("search")
 @click.option(
-    "--limit", default=3, help="Maximum number of records to return (default: 10000)"
+    "--limit", default=3, help="Maximum number of records to return (default: 3)"
 )
 @click.option("--offset", default=0, help="Number of records to skip (default: 0)")
 @click.option(
@@ -196,7 +199,7 @@ def get_observations_by_entity(
     default="pretty",
     help="Output format. Valid formats are: json, csv, pretty.",
 )
-@click.argument("query", required=True, nargs=1)
+@click.argument("query", required=True, nargs=-1)
 def search_for_entity(query, limit, offset, format):
     """
     Search for entities.

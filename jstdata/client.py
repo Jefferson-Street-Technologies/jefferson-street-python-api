@@ -29,6 +29,8 @@ class JeffersonStreetClient:
         Args:
             api_key: The API key for authenticating with the Jefferson Street REST API.
         """
+        
+        api_key = api_key or os.getenv("JEFFERSON_STREET_API_KEY")
         if api_key is None:
             raise ApiKeyNotSetError("API key is not set")
         self._api_key = api_key
