@@ -1,17 +1,11 @@
 import os
 import sys
-
 import click
 
-from .client import ApiKeyNotSetError, JeffersonStreetClient
+from .client import ApiKeyNotSetError, JSTDataClient
 from .utils import common_params, format_and_print
 
-try:
-    client = JeffersonStreetClient()
-except ApiKeyNotSetError as e:
-    raise click.Abort('hello')
-
-
+client = JSTDataClient()
 
 @click.group()
 def cli():
@@ -51,29 +45,44 @@ def list_entity_groups(format):
     """
     List all available entity groups.
     """
-    entity_groups = client.get_entity_groups()
+    response = client.make_request("entity/groups")
+    entity_groups = response["records"]
     format_and_print(entity_groups, format)
 
 
 @entity.command("values")
 @click.argument("entity_group", required=True)
+@click.option(
+    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
+)
 @common_params
-def list_entities(entity_group, limit, format, offset):
+def list_entities(entity_group, limit, format, offset, sort_order):
     """
     List entities within a specified entity group.
     """
-    results = client.get_entities(entity_group, offset, limit)
+    response = client.make_request(
+        f"entity/{entity_group}",
+        {"offset": offset, "limit": limit, "sort_order": sort_order},
+    )
+    results = response["records"]
     format_and_print(results, format)
 
 
 @entity.command("metrics")
 @click.argument("entity", required=True)
+@click.option(
+    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
+)
 @common_params
-def get_entity_links(entity, limit, format, offset):
+def get_entity_links(entity, limit, format, offset, sort_order):
     """
     Retrieve metrics associated with a specific entity.
     """
-    results = client.get_entity_metrics(entity, limit, offset)
+    response = client.make_request(
+        f"entity/{entity}/metrics",
+        {"limit": limit, "offset": offset, "sort_order": sort_order},
+    )
+    results = response["records"]
     format_and_print(results, format)
 
 
@@ -92,12 +101,23 @@ def list_metrics(limit, offset, sort_order, order_by, format, expanded):
     """
     List all available metrics.
     """
-    metrics = client.get_metrics(None, limit, offset, order_by, sort_order)
+    response = client.make_request(
+        "metric",
+        {
+            "metric": None,
+            "limit": limit,
+            "offset": offset,
+            "order_by": order_by,
+            "sort_order": sort_order,
+        },
+    )
+    metrics = response["records"]
     if expanded:
         format_and_print(metrics, format)
     else:
         condensed_metrics = [{"slug": m["slug"]} for m in metrics]
         format_and_print(condensed_metrics, format)
+
 
 
 @metric.command("show")
@@ -111,7 +131,15 @@ def show_metric(metric, format):
     """
     Display details for a specific metric.
     """
-    metric = client.get_metrics(metric)
+    response = client.make_request(
+        "metric",
+        {
+            "metric": None,
+            "limit": 1,
+            "offset": 0
+        },
+    )
+    metric = response["records"]
     format_and_print(metric, format)
 
 
@@ -126,7 +154,8 @@ def show_metric_dimensions(metric, format):
     """
     Display dimensions for a specific metric.
     """
-    dimensions = client.get_metric_dimensions(metric)
+    response = client.make_request(f"metric/{metric}/entities")
+    dimensions = response["records"]
     format_and_print(dimensions, format)
 
 
@@ -134,8 +163,9 @@ def show_metric_dimensions(metric, format):
 @common_params
 @click.argument("metric", required=True, nargs=1)
 @click.option(
-    "--sort_order", default="desc", help="Sort order (asc or desc, default: desc)"
+    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
 )
+@click.option("--order_by", type=click.Choice(["release_date", "series_label"]), default="release_date", help="Column to order by (default: release_date)")
 @click.option(
     "--start_date",
     default=None,
@@ -152,22 +182,34 @@ def show_metric_dimensions(metric, format):
     help="List of comma-separated entity slugs to filter by",
 )
 def get_observations_by_metric(
-    metric, sort_order, start_date, end_date, limit, offset, format, entity_filter
+    metric, sort_order, start_date, end_date, limit, offset, format, entity_filter, order_by
 ):
     """
     Retrieve observations for a specific metric.
     """
     entity_filter_list = entity_filter.split(",") if entity_filter else None
-    observations = client.query("metric", metric, start_date, end_date, limit, offset, sort_order=sort_order, entity_filter=entity_filter_list)
+    params = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit,
+        "offset": offset,
+        "sort_order": sort_order,
+        "order_by": order_by
+    }
+    if entity_filter is not None:
+        params["entities"] = entity_filter_list
+
+    response = client.make_request(f"query/metric/{metric}", params)
+    observations = response["records"]
     format_and_print(observations, format)
 
 
 @query.command("entity")
 @click.argument("entity", required=True, nargs=1)
 @click.option(
-    "--sort_order", default="desc", help="Sort order (asc or desc, default: desc)"
+    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
 )
-@click.option("--order_by", default="id", help="Column to order by (default: id)")
+@click.option("--order_by", type=click.Choice(["release_date", "series_label"]), default="release_date", help="Column to order by (default: release_date)")
 @click.option(
     "--start_date",
     default=None,
@@ -185,7 +227,17 @@ def get_observations_by_entity(
     """
     Retrieve observations for a specific entity.
     """
-    observations = client.query("entity", entity, start_date, end_date, limit, offset)
+    params = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit,
+        "offset": offset,
+        "sort_order": sort_order,
+        "order_by": order_by
+    }
+
+    response = client.make_request(f"query/entity/{entity}", params)
+    observations = response["records"]
     format_and_print(observations, format)
 
 
@@ -204,7 +256,10 @@ def search_for_entity(query, limit, offset, format):
     """
     Search for entities.
     """
-    results = client.search_for_entity(query, limit, offset)
+    response = client.make_request(
+        f"search/entity", {"query": query, "offset": offset, "limit": limit}
+    )
+    results = response["records"]
     format_and_print(results, format)
 
 

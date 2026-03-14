@@ -1,1 +1,1 @@
-from .client import JeffersonStreetClient
+from .client import JSTDataClient
