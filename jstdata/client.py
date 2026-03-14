@@ -1,8 +1,9 @@
-import os, json, dataclasses
+import os, json, dataclasses, hashlib
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union, List
 import requests
 from collections import namedtuple
+import pandas as pd
 
 EntityType = namedtuple("EntityType", ["name", "slug", "classification"])
 APP_DIR = Path.home() / ".jstdata"
@@ -47,6 +48,42 @@ class JSTDataClientConfig:
         with open(fp, "r") as f:
             return json.load(f)
 
+@dataclasses.dataclass
+class JSTDataCache:
+    endpoint: str
+    params: Optional[Dict[str, Union[str,int]]]
+
+    def __post_init__(self):
+        if self.params is None:
+            self.params = {}
+
+        sorted_items = sorted(self.params.items())
+        sorted_items = sorted(sorted_items, key=lambda x: x[0])
+        self.params = dict(sorted_items)
+
+        self._cache_dir = APP_DIR / "cache"
+        self._cache_dir.mkdir(exist_ok=True)
+
+        json_data = json.dumps({
+            "endpoint": self.endpoint,
+            "params": self.params,
+        })
+
+        key = hashlib.sha256(json_data.encode()).hexdigest()
+
+        self._cache_file = self._cache_dir / f"{key}.parquet"
+
+    def read(self):
+        if not self._cache_file.exists():
+            return None
+
+        print('read cache')
+        return json.loads(pd.read_parquet(self._cache_file).to_json())
+
+    def write(self, records: List[dict]):
+        print('write cache')
+        pd.DataFrame(records).to_parquet(self._cache_file)
+
 class JSTDataClient:
     def __init__(
             self,
@@ -89,7 +126,7 @@ class JSTDataClient:
         return self._cfg.write(**kwargs)
 
     def make_request(
-        self, endpoint: str, params: Optional[Dict[str, Any]] = None
+        self, endpoint: str, params: Optional[Dict[str, Any]] = None, enable_cache: bool = False
     ) -> Dict[str, Any]:
         """
         Makes a GET request to the specified API endpoint.
@@ -111,14 +148,28 @@ class JSTDataClient:
             endpoint = f"/{endpoint}"
 
         url = f"{self.base_url}{endpoint}"
+
+        cache = JSTDataCache(endpoint, params)
+        if enable_cache:
+            cached_records = cache.read()
+            if cached_records:
+                return {
+                    'limit': params.get("limit"),
+                    'offset': params.get("offset"),
+                    "records": cached_records
+                }
+
+        api_key = self.api_key
         with requests.Session() as session:
-            session.params = {"api-key": self.api_key}
+            session.params = {"api-key": api_key}
             response = session.get(url, params=params)
 
         if response.status_code == 403:
             raise InvalidApiKeyError("Invalid API key")
 
         response.raise_for_status()
+        if enable_cache:
+            cache.write(response.json().get("records"))
         return response.json()
 
     def get_endpoints(self):
