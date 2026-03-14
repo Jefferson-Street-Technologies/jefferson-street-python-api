@@ -77,11 +77,9 @@ class JSTDataCache:
         if not self._cache_file.exists():
             return None
 
-        print('read cache')
         return json.loads(pd.read_parquet(self._cache_file).to_json())
 
     def write(self, records: List[dict]):
-        print('write cache')
         pd.DataFrame(records).to_parquet(self._cache_file)
 
 class JSTDataClient:
