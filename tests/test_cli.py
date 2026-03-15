@@ -5,7 +5,7 @@ import requests_mock
 from click.testing import CliRunner
 
 from jstdata.cli import cli
-from jstdata.client import JeffersonStreetClient
+from jstdata.client import JSTDataClient
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def runner():
 @pytest.fixture
 def mock_url():
     """Fixture for the base URL of the Jefferson Street API."""
-    return JeffersonStreetClient.base_url
+    return 'https://api.some-site.io'
 
 
 def test_cli_help(runner):
@@ -32,7 +32,9 @@ def test_cli_help(runner):
 
 def test_metric_ls_success(runner, mock_url, monkeypatch):
     """Test 'jstdata metric ls' command with a successful API response."""
-    monkeypatch.setenv("JEFFERSON_STREET_API_KEY", "test_api_key")
+    monkeypatch.setattr(
+        "jstdata.cli.client", JSTDataClient(api_key="testing", base_url=mock_url)
+    )
     expected_metrics = [
         {
             "slug": "metric1",
@@ -58,7 +60,9 @@ def test_metric_ls_success(runner, mock_url, monkeypatch):
 
 def test_metric_ls_expanded_success(runner, mock_url, monkeypatch):
     """Test 'jstdata metric ls --expanded' command with a successful API response."""
-    monkeypatch.setenv("JEFFERSON_STREET_API_KEY", "test_api_key")
+    monkeypatch.setattr(
+        "jstdata.cli.client", JSTDataClient(api_key="testing", base_url=mock_url)
+    )
     expected_metrics = [
         {
             "slug": "metric1",
