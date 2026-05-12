@@ -1,4 +1,3 @@
-import os
 import sys
 import click
 
@@ -33,6 +32,13 @@ def query():
     """
     Commands for querying data.
     """
+
+@cli.command()
+def config():
+    """
+    Commands for configuring API keys.
+    """
+    click.echo({"api_key": client._cfg.api_key, "base_url": client._cfg.base_url})
 
 
 @entity.command("groups")
@@ -134,27 +140,37 @@ def show_metric(metric, format):
     response = client.make_request(
         "metric",
         {
-            "metric": None,
+            "metric": metric,
             "limit": 1,
             "offset": 0
         },
     )
-    metric = response["records"]
-    format_and_print(metric, format)
+    records = response["records"]
+    format_and_print(records, format)
 
 
 @metric.command("entities")
 @click.argument("metric", required=True)
 @click.option(
+    "--entity_filter",
+    default=None,
+    help="List of comma-separated entity slugs to filter by",
+)
+@click.option(
     "--format",
     default="pretty",
     help="Output format. Valid formats are: json, csv, pretty.",
 )
-def show_metric_dimensions(metric, format):
+def show_metric_dimensions(metric, entity_filter, format):
     """
     Display dimensions for a specific metric.
     """
-    response = client.make_request(f"metric/{metric}/entities")
+    if entity_filter is not None:
+        entity_filter_list = entity_filter.split(",")
+        params = {"entities": entity_filter_list}
+    else:
+        params = {}
+    response = client.make_request(f"metric/{metric}/entities", params)
     dimensions = response["records"]
     format_and_print(dimensions, format)
 

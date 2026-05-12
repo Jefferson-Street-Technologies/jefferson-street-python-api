@@ -28,14 +28,18 @@ class JSTDataClientConfig:
     def __post_init__(self):
         APP_DIR.mkdir(exist_ok=True)
         self._default_cache_file = APP_DIR / "cache.json"
-        if not self._default_cache_file.exists():
+        if not self._default_cache_file.exists(): # write config if it doesn't already exist
             with open(self._default_cache_file, "w") as f:
                 json.dump({}, f)
+        else: # read config if it already exists
+            with open(self._default_cache_file, "r") as f:
+                cfg = json.load(f)
+                self.api_key = cfg.get("api_key")
+                self.base_url = cfg.get("base_url")
 
         self.config_file = self._default_cache_file
 
     def write(self, **kwargs) -> None:
-        fp = kwargs.get("config_file") or self.config_file
         cfg = {
             "api_key": kwargs.get("api_key") or self.api_key,
             "base_url": kwargs.get("base_url") or self.base_url
@@ -118,7 +122,7 @@ class JSTDataClient:
     def base_url(self):
         cached_cfg = self._cfg.read()
         cached_base_url = cached_cfg.get("base_url")
-        return self._cfg.base_url or cached_base_url
+        return cached_base_url or self._cfg.base_url
 
     def cache_config(self, **kwargs):
         return self._cfg.write(**kwargs)
