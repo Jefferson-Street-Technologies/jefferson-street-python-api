@@ -1,33 +1,83 @@
-# jstdata
+# Jefferson Street Data (jstdata)
 
-A Python interface to the Jefferson Street REST API.
+A Python interface and Research OS for the Jefferson Street financial and economic data API.
+
+## Design Philosophy: From Filing Cabinet to Knowledge Graph
+
+`jstdata` is built to minimize the friction between human thought and actionable data.
+
+- **Series-First**: The individual data series is the primary resource, carrying its own metadata (frequency, units, source).
+- **Entity Graph**: Entities are nodes in a relational graph, allowing you to "walk" from a company to its sector, or a country to its states.
+- **Intent over IDs**: Both the CLI and Python API favor human-readable intent (fuzzy search) over memorizing obscure slugs.
+- **Reproducible Discovery**: High-speed discovery in the CLI transitions seamlessly into immutable, reproducible code in Python Notebooks.
+
+---
 
 ## Installation
 
 ```bash
-pip install jstdata
+# Using poetry
+poetry install
+
+# Manual install
+pip install .
 ```
 
-## Usage
+## The TUI Workbench (`jst tui`)
 
-Set your API key as an environment variable:
+The "Telescope" for your data. Launch an interactive workbench for high-density discovery.
+
+- **Live Fuzzy Refinement**: Type keywords to see Metrics, Entities, and Series update in real-time.
+- **Deep Drill-down**: Press `Enter` on any result to fetch associated series, graph relations, or recent observations.
+- **The Intent Bridge**:
+    - Press `c` to copy a resource ID.
+    - Press `p` to copy a fully-formed Python snippet for your Notebook.
+- **Navigation**: Vim-style `j`/`k` for scrolling, `Enter` to focus results, and `Ctrl+C` or `q` to quit.
+
+## The Scriptable CLI (`jst`)
+
+A "pipe-friendly" interface designed for automation and quick extraction.
 
 ```bash
-export JEFFERSON_STREET_API_KEY="your_api_key_here"
+# Fuzzy query by intent
+jst query --metric inflation --entity "United States" --frequency Monthly
+
+# Explore the entity graph
+jst entity relations usa --format pretty
+
+# Search for resources
+jst series search "housing starts"
 ```
 
-Then you can use the CLI:
+## The Python API
 
-```bash
-jst --help
-```
-
-Or use it as a Python library:
+Designed for a robust experience in Jupyter/IPython notebooks.
 
 ```python
-from jstdata.client import JeffersonStreetClient
+from jstdata import JSTDataClient
 
-client = JeffersonStreetClient("your_api_key_here")
-metrics = client.get_metrics()
-print(metrics)
+client = JSTDataClient()
+
+# High-performance DataFrame extraction
+df = client.query_df(
+    metric="gross-domestic-product",
+    entity=["usa", "gbr"],
+    start_date="2020-01-01"
+)
+
+# Semantic exploration
+series = client.get_entity_series("apple-inc")
+relations = client.get_entity_relations("usa")
 ```
+
+## Configuration
+
+The client looks for configuration in `~/.jstdata/cache.json`.
+
+```bash
+jst config
+```
+
+## License
+
+MIT

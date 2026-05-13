@@ -1,287 +1,205 @@
 import sys
 import click
+from typing import List, Union, Optional
 
-from .client import ApiKeyNotSetError, JSTDataClient
-from .utils import common_params, format_and_print
+from .client import ApiKeyNotSetError, JSTDataClient, InvalidApiKeyError
+from .utils import common_params, common_search_params, format_and_print
 
 client = JSTDataClient()
+
+def resolve_id(value: str, search_func) -> str:
+    """
+    Helper to resolve a potential ID or search for it.
+    Emphasizes 'Intent over IDs'.
+    """
+    # Simple heuristic: if it looks like an ID (no spaces, all lowercase/dashes),
+    # we might still want to check if it's valid, but for now let's just use search
+    # if it's not a perfect match.
+    # In a real scenario, we might try a direct lookup first.
+    try:
+        results = search_func(value, limit=1)
+        if results:
+            return results[0].id
+    except Exception:
+        pass
+    return value
 
 @click.group()
 def cli():
     """
-    Jefferson Street CLI.
-    """
-
-
-@cli.group()
-def metric():
-    """
-    Commands for interacting with metrics.
-    """
-
-
-@cli.group()
-def entity():
-    """
-    Commands for interacting with entities.
-    """
-
-
-@cli.group()
-def query():
-    """
-    Commands for querying data.
+    Jefferson Street CLI - A Research OS for Financial Data.
     """
 
 @cli.command()
 def config():
     """
-    Commands for configuring API keys.
+    Display current API configuration.
     """
-    click.echo({"api_key": client._cfg.api_key, "base_url": client._cfg.base_url})
+    click.echo(f"Base URL: {client.base_url}")
+    try:
+        click.echo(f"API Key: {client.api_key[:4]}...{client.api_key[-4:]}")
+    except ApiKeyNotSetError:
+        click.echo("API Key: Not set")
 
+# --- Metric Commands ---
 
-@entity.command("groups")
-@click.option(
-    "--format",
-    default="pretty",
-    help="Output format. Valid formats are: json, csv, pretty.",
-)
-def list_entity_groups(format):
-    """
-    List all available entity groups.
-    """
-    response = client.make_request("entity/groups")
-    entity_groups = response["records"]
-    format_and_print(entity_groups, format)
-
-
-@entity.command("values")
-@click.argument("entity_group", required=True)
-@click.option(
-    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
-)
-@common_params
-def list_entities(entity_group, limit, format, offset, sort_order):
-    """
-    List entities within a specified entity group.
-    """
-    response = client.make_request(
-        f"entity/{entity_group}",
-        {"offset": offset, "limit": limit, "sort_order": sort_order},
-    )
-    results = response["records"]
-    format_and_print(results, format)
-
-
-@entity.command("metrics")
-@click.argument("entity", required=True)
-@click.option(
-    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
-)
-@common_params
-def get_entity_links(entity, limit, format, offset, sort_order):
-    """
-    Retrieve metrics associated with a specific entity.
-    """
-    response = client.make_request(
-        f"entity/{entity}/metrics",
-        {"limit": limit, "offset": offset, "sort_order": sort_order},
-    )
-    results = response["records"]
-    format_and_print(results, format)
-
+@cli.group()
+def metric():
+    """Commands for interacting with Metrics (themes)."""
 
 @metric.command("ls")
 @common_params
-@click.option(
-    "--sort_order", default="desc", help="Sort order (asc or desc, default: desc)"
-)
-@click.option(
-    "--order_by",
-    default="last_updated",
-    help="Column to order by (default: last_updated)",
-)
-@click.option("--expanded", is_flag=True, default=False, help="Return expanded metrics")
-def list_metrics(limit, offset, sort_order, order_by, format, expanded):
-    """
-    List all available metrics.
-    """
-    response = client.make_request(
-        "metric",
-        {
-            "metric": None,
-            "limit": limit,
-            "offset": offset,
-            "order_by": order_by,
-            "sort_order": sort_order,
-        },
-    )
-    metrics = response["records"]
-    if expanded:
-        format_and_print(metrics, format)
-    else:
-        condensed_metrics = [{"slug": m["slug"]} for m in metrics]
-        format_and_print(condensed_metrics, format)
-
-
-
-@metric.command("show")
-@click.argument("metric", required=True)
-@click.option(
-    "--format",
-    default="pretty",
-    help="Output format. Valid formats are: json, csv, pretty.",
-)
-def show_metric(metric, format):
-    """
-    Display details for a specific metric.
-    """
-    response = client.make_request(
-        "metric",
-        {
-            "metric": metric,
-            "limit": 1,
-            "offset": 0
-        },
-    )
-    records = response["records"]
-    format_and_print(records, format)
-
-
-@metric.command("entities")
-@click.argument("metric", required=True)
-@click.option(
-    "--entity_filter",
-    default=None,
-    help="List of comma-separated entity slugs to filter by",
-)
-@click.option(
-    "--format",
-    default="pretty",
-    help="Output format. Valid formats are: json, csv, pretty.",
-)
-def show_metric_dimensions(metric, entity_filter, format):
-    """
-    Display dimensions for a specific metric.
-    """
-    if entity_filter is not None:
-        entity_filter_list = entity_filter.split(",")
-        params = {"entities": entity_filter_list}
-    else:
-        params = {}
-    response = client.make_request(f"metric/{metric}/entities", params)
-    dimensions = response["records"]
-    format_and_print(dimensions, format)
-
-
-@query.command("metric")
-@common_params
-@click.argument("metric", required=True, nargs=1)
-@click.option(
-    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
-)
-@click.option("--order_by", type=click.Choice(["release_date", "series_label"]), default="release_date", help="Column to order by (default: release_date)")
-@click.option(
-    "--start_date",
-    default=None,
-    help="Start period. Valid formats: YYYY-MM-DD, YYYY-MM, YYYY, unix timestamp",
-)
-@click.option(
-    "--end_date",
-    default=None,
-    help="End period. Valid formats: YYYY-MM-DD, YYYY-MM, YYYY, unix timestamp",
-)
-@click.option(
-    "--entity_filter",
-    default=None,
-    help="List of comma-separated entity slugs to filter by",
-)
-def get_observations_by_metric(
-    metric, sort_order, start_date, end_date, limit, offset, format, entity_filter, order_by
-):
-    """
-    Retrieve observations for a specific metric.
-    """
-    entity_filter_list = entity_filter.split(",") if entity_filter else None
-    params = {
-        "start_date": start_date,
-        "end_date": end_date,
-        "limit": limit,
-        "offset": offset,
-        "sort_order": sort_order,
-        "order_by": order_by
-    }
-    if entity_filter is not None:
-        params["entities"] = entity_filter_list
-
-    response = client.make_request(f"query/metric/{metric}", params)
-    observations = response["records"]
-    format_and_print(observations, format)
-
-
-@query.command("entity")
-@click.argument("entity", required=True, nargs=1)
-@click.option(
-    "--sort_order", type=click.Choice(["asc", "desc"]), default="desc", help="Sort order (asc or desc, default: desc)"
-)
-@click.option("--order_by", type=click.Choice(["release_date", "series_label"]), default="release_date", help="Column to order by (default: release_date)")
-@click.option(
-    "--start_date",
-    default=None,
-    help="Start period. Valid formats: YYYY-MM-DD, YYYY-MM, YYYY, unix timestamp",
-)
-@click.option(
-    "--end_date",
-    default=None,
-    help="End period. Valid formats: YYYY-MM-DD, YYYY-MM, YYYY, unix timestamp",
-)
-@common_params
-def get_observations_by_entity(
-    entity, sort_order, order_by, start_date, end_date, limit, offset, format
-):
-    """
-    Retrieve observations for a specific entity.
-    """
-    params = {
-        "start_date": start_date,
-        "end_date": end_date,
-        "limit": limit,
-        "offset": offset,
-        "sort_order": sort_order,
-        "order_by": order_by
-    }
-
-    response = client.make_request(f"query/entity/{entity}", params)
-    observations = response["records"]
-    format_and_print(observations, format)
-
-
-@entity.command("search")
-@click.option(
-    "--limit", default=3, help="Maximum number of records to return (default: 3)"
-)
-@click.option("--offset", default=0, help="Number of records to skip (default: 0)")
-@click.option(
-    "--format",
-    default="pretty",
-    help="Output format. Valid formats are: json, csv, pretty.",
-)
-@click.argument("query", required=True, nargs=-1)
-def search_for_entity(query, limit, offset, format):
-    """
-    Search for entities.
-    """
-    response = client.make_request(
-        f"search/entity", {"query": query, "offset": offset, "limit": limit}
-    )
-    results = response["records"]
+def list_metrics(limit, offset, format):
+    """List all available metrics."""
+    results = client.list_metrics(limit=limit, offset=offset)
     format_and_print(results, format)
 
+@metric.command("show")
+@click.argument("id")
+@click.option("--format", default="pretty")
+def show_metric(id, format):
+    """Show details for a specific metric."""
+    results = client.get_metric(id)
+    format_and_print(results, format)
+
+@metric.command("search")
+@click.argument("query")
+@common_search_params
+def search_metrics(query, limit, offset, format):
+    """Search for metrics by intent."""
+    results = client.search_metrics(query, limit=limit, offset=offset)
+    format_and_print(results, format)
+
+@metric.command("series")
+@click.argument("id")
+@common_params
+def metric_series(id, limit, offset, format):
+    """List all series associated with a metric."""
+    results = client.get_metric_series(id, limit=limit, offset=offset)
+    format_and_print(results, format)
+
+# --- Entity Commands ---
+
+@cli.group()
+def entity():
+    """Commands for interacting with Entities (contexts)."""
+
+@entity.command("show")
+@click.argument("id")
+@click.option("--format", default="pretty")
+def show_entity(id, format):
+    """Show details for a specific entity."""
+    results = client.get_entity(id)
+    format_and_print(results, format)
+
+@entity.command("search")
+@click.argument("query")
+@common_search_params
+def search_entities(query, limit, offset, format):
+    """Search for entities by intent."""
+    results = client.search_entities(query, limit=limit, offset=offset)
+    format_and_print(results, format)
+
+@entity.command("series")
+@click.argument("id")
+@common_params
+def entity_series(id, limit, offset, format):
+    """List all series associated with an entity."""
+    results = client.get_entity_series(id, limit=limit, offset=offset)
+    format_and_print(results, format)
+
+@entity.command("relations")
+@click.argument("id")
+@common_params
+def entity_relations(id, limit, offset, format):
+    """Walk the entity graph."""
+    results = client.get_entity_relations(id, limit=limit, offset=offset)
+    format_and_print(results, format)
+
+# --- Series Commands ---
+
+@cli.group()
+def series():
+    """Commands for interacting with Series (data points)."""
+
+@series.command("ls")
+@common_params
+def list_series(limit, offset, format):
+    """List all available series."""
+    results = client.list_series(limit=limit, offset=offset)
+    format_and_print(results, format)
+
+@series.command("show")
+@click.argument("id")
+@click.option("--format", default="pretty")
+def show_series(id, format):
+    """Show details for a specific series."""
+    results = client.get_series(id)
+    format_and_print(results, format)
+
+@series.command("search")
+@click.argument("query")
+@common_search_params
+def search_series(query, limit, offset, format):
+    """Search for series by intent."""
+    results = client.search_series(query, limit=limit, offset=offset)
+    format_and_print(results, format)
+
+# --- Query Command ---
+
+@cli.command()
+@click.option("--metric", multiple=True, help="Metric ID(s) or keywords")
+@click.option("--entity", multiple=True, help="Entity ID(s) or keywords")
+@click.option("--series", multiple=True, help="Series ID(s) or keywords")
+@click.option("--frequency", type=click.Choice(["Annual", "Quarterly", "Monthly", "Daily", "Intraday"]))
+@click.option("--start-date", help="Start date (YYYY-MM-DD)")
+@click.option("--end-date", help="End date (YYYY-MM-DD)")
+@click.option("--fuzzy", is_flag=True, default=True, help="Try to resolve keywords to IDs automatically")
+@common_params
+def query(metric, entity, series, frequency, start_date, end_date, fuzzy, limit, offset, format):
+    """
+    The unified query engine. Mix and match metrics, entities, and series.
+    """
+    m_ids = list(metric)
+    e_ids = list(entity)
+    s_ids = list(series)
+
+    if fuzzy:
+        m_ids = [resolve_id(m, client.search_metrics) for m in m_ids]
+        e_ids = [resolve_id(e, client.search_entities) for e in e_ids]
+        s_ids = [resolve_id(s, client.search_series) for s in s_ids]
+
+    results = client.query(
+        metric=m_ids or None,
+        entity=e_ids or None,
+        series=s_ids or None,
+        frequency=frequency,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset
+    )
+    
+    format_and_print(results, format)
+
+@cli.command()
+def tui():
+    """
+    Launch the interactive TUI workbench.
+    """
+    from .tui import JSTDataApp
+    app = JSTDataApp(client)
+    app.run()
 
 if __name__ == "__main__":
     try:
         cli()
     except ApiKeyNotSetError as e:
         click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except InvalidApiKeyError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Unexpected error: {e}", err=True)
         sys.exit(1)

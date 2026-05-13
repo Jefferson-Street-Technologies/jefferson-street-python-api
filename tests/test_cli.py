@@ -1,9 +1,6 @@
-import os
-
 import pytest
 import requests_mock
 from click.testing import CliRunner
-
 from jstdata.cli import cli
 from jstdata.client import JSTDataClient
 
@@ -17,69 +14,85 @@ def runner():
 @pytest.fixture
 def mock_url():
     """Fixture for the base URL of the Jefferson Street API."""
-    return 'https://api.some-site.io'
+    return 'https://api.jeffersonst.io'
+
+
+@pytest.fixture(autouse=True)
+def mock_client(monkeypatch, mock_url, tmp_path):
+    # Set APP_DIR to a temp path
+    monkeypatch.setattr("jstdata.client.APP_DIR", tmp_path)
+    client = JSTDataClient(api_key="testing", base_url=mock_url)
+    monkeypatch.setattr("jstdata.cli.client", client)
+    return client
 
 
 def test_cli_help(runner):
     """Test the main CLI help message."""
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "Usage: cli [OPTIONS] COMMAND [ARGS]..." in result.output
-    assert "  metric  Commands for interacting with metrics." in result.output
-    assert "  entity  Commands for interacting with entities." in result.output
-    assert "  query   Commands for querying data." in result.output
+    assert "Jefferson Street CLI - A Research OS for Financial Data." in result.output
 
 
-def test_metric_ls_success(runner, mock_url, monkeypatch):
-    """Test 'jstdata metric ls' command with a successful API response."""
-    monkeypatch.setattr(
-        "jstdata.cli.client", JSTDataClient(api_key="testing", base_url=mock_url)
-    )
-    expected_metrics = [
-        {
-            "slug": "metric1",
-            "name": "Metric One",
-            "frequency": "daily",
-            "unit": "count",
-            "last_updated": "2023-01-01",
-        }
-    ]
-
+def test_metric_ls(runner, mock_url):
+    """Test 'metric ls' command."""
+    mock_data = {
+        "records": [
+            {"id": "gdp", "name": "Gross Domestic Product"}
+        ]
+    }
     with requests_mock.Mocker() as m:
-        m.get(f"{mock_url}/heartbeat", json={"status": "ok"})
-        m.get(f"{mock_url}/metric", json={"records": expected_metrics})
-
+        m.get(f"{mock_url}/metric", json=mock_data)
         result = runner.invoke(cli, ["metric", "ls"])
         assert result.exit_code == 0
-        assert "metric1" in result.output
-        # Verify the table format for condensed metrics
-        assert "+------+" in result.output
-        assert "| slug |" in result.output
-        assert "+------+" in result.output
+        assert "gdp" in result.output
+        assert "Gross Domestic Product" in result.output
 
 
-def test_metric_ls_expanded_success(runner, mock_url, monkeypatch):
-    """Test 'jstdata metric ls --expanded' command with a successful API response."""
-    monkeypatch.setattr(
-        "jstdata.cli.client", JSTDataClient(api_key="testing", base_url=mock_url)
-    )
-    expected_metrics = [
-        {
-            "slug": "metric1",
-            "name": "Metric One",
-            "frequency": "daily",
-            "unit": "count",
-            "last_updated": "2023-01-01",
-        }
-    ]
-
+def test_query_direct_id(runner, mock_url):
+    """Test 'query' command with direct IDs."""
+    mock_query_data = {
+        "records": [
+            {
+                "series_id": "ABC123",
+                "observation_timestamp": "2024-01-01T00:00:00",
+                "release_timestamp": "2024-01-01T00:00:00",
+                "value": 100.0
+            }
+        ]
+    }
+    # Mock search calls that resolve_id might make
     with requests_mock.Mocker() as m:
-        m.get(f"{mock_url}/heartbeat", json={"status": "ok"})
-        m.get(f"{mock_url}/metric", json={"records": expected_metrics})
-
-        result = runner.invoke(cli, ["metric", "ls", "--expanded"])
+        m.get(f"{mock_url}/search/metrics", json={"records": [{"id": "gdp", "name": "GDP"}]})
+        m.get(f"{mock_url}/search/entities", json={"records": [{"id": "usa", "label": "USA"}]})
+        m.get(f"{mock_url}/query", json=mock_query_data)
+        
+        result = runner.invoke(cli, ["query", "--metric", "gdp", "--entity", "usa"])
         assert result.exit_code == 0
-        assert "metric1" in result.output
-        assert "Metric One" in result.output
-        assert "daily" in result.output
-        assert "count" in result.output
+        assert "ABC123" in result.output
+        assert "100.0" in result.output
+
+
+def test_query_fuzzy_resolution(runner, mock_url):
+    """Test 'query' command with fuzzy resolution of keywords."""
+    mock_query_data = {
+        "records": [
+            {
+                "series_id": "ABC123",
+                "observation_timestamp": "2024-01-01T00:00:00",
+                "release_timestamp": "2024-01-01T00:00:00",
+                "value": 100.0
+            }
+        ]
+    }
+    with requests_mock.Mocker() as m:
+        # Resolve 'inflation' to 'cpi'
+        m.get(f"{mock_url}/search/metrics?query=inflation&limit=1", json={"records": [{"id": "cpi", "name": "CPI"}]})
+        # Resolve 'america' to 'usa'
+        m.get(f"{mock_url}/search/entities?query=america&limit=1", json={"records": [{"id": "usa", "label": "USA"}]})
+        m.get(f"{mock_url}/query", json=mock_query_data)
+        
+        result = runner.invoke(cli, ["query", "--metric", "inflation", "--entity", "america"])
+        assert result.exit_code == 0
+        # Verify that the query was called with resolved IDs
+        assert m.request_history[-1].qs["metric"] == ["cpi"]
+        assert m.request_history[-1].qs["entity"] == ["usa"]
