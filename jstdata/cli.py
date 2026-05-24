@@ -31,15 +31,57 @@ def cli():
     """
 
 @cli.command()
+@click.option("--api-key", prompt="Enter your Jefferson Street API Key", hide_input=True, help="Your API Key")
+def login(api_key):
+    """
+    Authenticate with the Jefferson Street API.
+    """
+    click.echo("Validating API key...")
+    try:
+        if client.validate_key(api_key):
+            click.secho("Success! Authenticated.", fg="green")
+            client._cfg.write(api_key=api_key)
+            from .client import CONFIG_FILE
+            click.echo(f"Configuration saved to {CONFIG_FILE.absolute()}")
+        else:
+            click.secho("Error: Invalid API key.", fg="red", err=True)
+            sys.exit(1)
+    except Exception as e:
+        click.secho(f"Error during validation: {e}", fg="red", err=True)
+        sys.exit(1)
+
+@cli.group()
 def config():
     """
-    Display current API configuration.
+    Manage CLI configuration.
     """
-    click.echo(f"Base URL: {client.base_url}")
+    pass
+
+@config.command("show")
+@click.option("--verbose", "-v", is_flag=True, help="Show advanced configuration like base URL")
+def config_show(verbose):
+    """
+    Display current configuration.
+    """
+    if verbose:
+        click.echo(f"Base URL: {client.base_url}")
+    
     try:
-        click.echo(f"API Key: {client.api_key[:4]}...{client.api_key[-4:]}")
+        key = client.api_key
+        masked_key = f"{key[:4]}...{key[-4:]}"
+        click.echo(f"API Key: {masked_key}")
     except ApiKeyNotSetError:
         click.echo("API Key: Not set")
+
+@config.command("set")
+@click.argument("key", type=click.Choice(["api_key", "base_url"]))
+@click.argument("value")
+def config_set(key, value):
+    """
+    Update a configuration value.
+    """
+    client._cfg.write(**{key: value})
+    click.echo(f"Set {key} to {value}")
 
 # --- Metric Commands ---
 
@@ -195,8 +237,14 @@ if __name__ == "__main__":
     try:
         cli()
     except ApiKeyNotSetError as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        click.secho(f"Error: {e}", fg="red", err=True)
+        if sys.stdin.isatty():
+            if click.confirm("Would you like to run 'jstdata login' now?"):
+                # Use click.Context to invoke the login command
+                ctx = cli.make_context("login", [])
+                cli.invoke(ctx)
+        else:
+            sys.exit(1)
     except InvalidApiKeyError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)

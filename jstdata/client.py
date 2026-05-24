@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -16,6 +17,7 @@ from .models import (
 )
 
 APP_DIR = Path.home() / ".jstdata"
+CONFIG_FILE = APP_DIR / "config.json"
 
 
 class ApiKeyNotSetError(Exception):
@@ -33,33 +35,57 @@ class InvalidInputError(Exception):
 @dataclass
 class JSTDataClientConfig:
     api_key: Optional[str] = None
-    base_url: str = "https://api.jeffersonst.io"
+    base_url: Optional[str] = None
 
     def __post_init__(self):
         APP_DIR.mkdir(exist_ok=True)
-        self._default_cache_file = APP_DIR / "cache.json"
-        if not self._default_cache_file.exists():
-            with open(self._default_cache_file, "w") as f:
-                json.dump({}, f)
-        else:
-            with open(self._default_cache_file, "r") as f:
-                cfg = json.load(f)
-                self.api_key = cfg.get("api_key")
-                self.base_url = cfg.get("base_url")
+        
+        # 1. Start with defaults
+        default_url = "https://api.jeffersonst.io"
+        
+        # 2. Layer on config file if it exists
+        file_api_key = None
+        file_base_url = None
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, "r") as f:
+                    cfg = json.load(f)
+                    file_api_key = cfg.get("api_key")
+                    file_base_url = cfg.get("base_url")
+            except (json.JSONDecodeError, IOError):
+                pass
 
-        self.config_file = self._default_cache_file
+        # Precedence: Env > Arg > File > Default
+        # self.api_key and self.base_url contain 'Arg' if passed, else None.
+        
+        self.api_key = os.environ.get("JSTDATA_API_KEY") or self.api_key or file_api_key
+        self.base_url = os.environ.get("JSTDATA_BASE_URL") or self.base_url or file_base_url or default_url
 
     def write(self, **kwargs) -> None:
-        cfg = {
-            "api_key": kwargs.get("api_key") or self.api_key,
-            "base_url": kwargs.get("base_url") or self.base_url,
-        }
-        with open(self.config_file, "w") as f:
-            json.dump(cfg, f)
+        """Write configuration to the config file."""
+        # Read current to preserve keys we aren't updating
+        current = {}
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, "r") as f:
+                    current = json.load(f)
+            except:
+                pass
 
-    def read(self, **kwargs) -> Dict[str, str]:
-        fp = kwargs.get("config_file") or self.config_file
-        with open(fp, "r") as f:
+        current["api_key"] = kwargs.get("api_key") or current.get("api_key") or self.api_key
+        current["base_url"] = kwargs.get("base_url") or current.get("base_url") or self.base_url
+
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(current, f, indent=2)
+        
+        # Restrict permissions to owner read/write
+        CONFIG_FILE.chmod(0o600)
+
+    def read(self) -> Dict[str, Any]:
+        """Read the current configuration from file."""
+        if not CONFIG_FILE.exists():
+            return {}
+        with open(CONFIG_FILE, "r") as f:
             return json.load(f)
 
 
@@ -102,7 +128,7 @@ class JSTDataCache:
 
 class JSTDataClient:
     def __init__(
-        self, api_key: Optional[str] = None, base_url: str = "https://api.jeffersonst.io"
+        self, api_key: Optional[str] = None, base_url: Optional[str] = None
     ):
         """
         Initializes the JSTDataClient.
@@ -111,24 +137,40 @@ class JSTDataClient:
             api_key: The API key for authenticating with the Jefferson Street REST API.
             base_url: The base URL of the API.
         """
-        self._cfg = JSTDataClientConfig(api_key=api_key, base_url=base_url)
+        # Pass non-None values to override defaults/config/env
+        kwargs = {}
+        if api_key: kwargs["api_key"] = api_key
+        if base_url: kwargs["base_url"] = base_url
+        self._cfg = JSTDataClientConfig(**kwargs)
 
     @property
     def api_key(self):
-        api_key = self._cfg.api_key
-        if not api_key:
-            cached_cfg = self._cfg.read()
-            cached_api_key = cached_cfg.get("api_key")
-            if not cached_api_key:
-                raise ApiKeyNotSetError("API key is not set")
-            return cached_api_key
-        return api_key
+        if not self._cfg.api_key:
+            raise ApiKeyNotSetError("API key is not set. Run 'jstdata login' or set JSTDATA_API_KEY.")
+        return self._cfg.api_key
 
     @property
     def base_url(self):
-        cached_cfg = self._cfg.read()
-        cached_base_url = cached_cfg.get("base_url")
-        return cached_base_url or self._cfg.base_url
+        return self._cfg.base_url
+
+    def validate_key(self, api_key: Optional[str] = None) -> bool:
+        """
+        Validates the API key by making a lightweight request.
+        """
+        original_key = self._cfg.api_key
+        if api_key:
+            self._cfg.api_key = api_key
+        
+        try:
+            # Simple lightweight request to verify the key
+            self.make_request("metric", params={"limit": 1})
+            return True
+        except InvalidApiKeyError:
+            return False
+        except Exception:
+            raise
+        finally:
+            self._cfg.api_key = original_key
 
     def make_request(
         self,
