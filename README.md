@@ -23,6 +23,45 @@ poetry install
 pip install .
 ```
 
+## Authentication & Configuration
+
+Before you can query data, you need to authenticate with your Jefferson Street API key.
+
+### Quick Start (CLI)
+
+The easiest way to get set up is using the interactive login command:
+
+```bash
+# This will prompt for your API key and validate it
+jst login
+```
+
+The CLI will guide you through the setup and save your credentials to `~/.jstdata/config.json` with secure permissions.
+
+### Environment Variables
+
+For CI/CD or temporary sessions, you can use environment variables. These take precedence over the config file:
+
+```bash
+export JSTDATA_API_KEY="your-api-key-here"
+# Optional: export JSTDATA_BASE_URL="https://api.jeffersonst.io"
+```
+
+### Managing Configuration
+
+You can view or update your configuration at any time:
+
+```bash
+# Show current (masked) API key
+jst config show
+
+# Show advanced config (base URL)
+jst config show --verbose
+
+# Manually update a value
+jst config set api_key XXX
+```
+
 ## The TUI Workbench (`jst tui`)
 
 The "Telescope" for your data. Launch an interactive workbench for high-density discovery.
@@ -69,15 +108,3 @@ df = client.query_df(
 series = client.get_entity_series("apple-inc")
 relations = client.get_entity_relations("usa")
 ```
-
-## Configuration
-
-The client looks for configuration in `~/.jstdata/cache.json`.
-
-```bash
-jst config
-```
-
-## License
-
-MIT
