@@ -234,12 +234,12 @@ def tui():
     app.run()
 
 @cli.command()
-def tui2():
+def console():
     """
     Launch the new high-density TUI workbench (v2).
     """
-    from .tui2 import JSTDataAppV2
-    app = JSTDataAppV2(client)
+    from .tui import JSTDataApp
+    app = JSTDataApp(client)
     app.run()
 
 if __name__ == "__main__":

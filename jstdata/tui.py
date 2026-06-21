@@ -1,343 +1,925 @@
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Input, ListItem, ListView, Static, Label, Button
-from textual.screen import ModalScreen
-from textual import on
+from textual.widgets import Header, Footer, Input, ListItem, ListView, Static, Label, Button, DataTable
+from textual.screen import Screen, ModalScreen
+from textual.binding import Binding
+from textual import on, work
 import asyncio
+import json
 
 from .client import JSTDataClient
-from .models import Series, Entity, Metric
+from .models import Series, Entity, Metric, EntityRelationship
 
-class InspectScreen(ModalScreen):
-    """A modal for deep inspection of a resource."""
-    
-    DEFAULT_CSS = """
-    InspectScreen {
-        align: center middle;
-    }
+# --- Custom Widgets ---
 
-    #inspect-container {
-        width: 80%;
-        height: 80%;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
-    }
-
-    #inspect-content {
-        height: 1fr;
-        overflow-y: scroll;
-    }
-
-    #inspect-footer {
-        height: 3;
-        align: center middle;
-    }
-    """
-
-    def __init__(self, resource: any, client: JSTDataClient):
-        super().__init__()
-        self.resource = resource
-        self.client = client
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="inspect-container"):
-            yield Static(id="inspect-content")
-            with Horizontal(id="inspect-footer"):
-                yield Button("Close (Esc)", variant="error", id="close-btn")
-
-    def on_mount(self) -> None:
-        asyncio.create_task(self._fetch_details())
-
-    @on(Button.Pressed, "#close-btn")
-    def on_close(self) -> None:
-        self.app.pop_screen()
-
-    async def _fetch_details(self) -> None:
-        content_widget = self.query_one("#inspect-content")
-        
-        if isinstance(self.resource, Series):
-            title = "[bold blue]Series Detail[/bold blue]"
-            fetch_func = lambda: self.client.query(series=self.resource.id, limit=10)
-            formatter = self._format_observations
-            drill_title = "Recent Observations"
-        elif isinstance(self.resource, Entity):
-            title = "[bold green]Entity Detail[/bold green]"
-            fetch_func = lambda: self.client.get_entity_relations(self.resource.id, limit=10)
-            formatter = self._format_relations
-            drill_title = "Entity Relations"
-        elif isinstance(self.resource, Metric):
-            title = "[bold yellow]Metric Detail[/bold yellow]"
-            fetch_func = lambda: self.client.get_metric_series(self.resource.id, limit=10)
-            formatter = self._format_series_list
-            drill_title = "Associated Series"
-        else:
-            content_widget.update(str(self.resource))
-            return
-
-        content_widget.update(f"{title}\n[italic]Fetching deep details...[/italic]")
-        
-        try:
-            data = await asyncio.to_thread(fetch_func)
-            drill_content = formatter(data)
-            output = f"{title}\nID: {self.resource.id}\nLabel: {getattr(self.resource, 'label', getattr(self.resource, 'name', ''))}\n"
-            output += f"\n[bold cyan]{drill_title}[/bold cyan]\n" + drill_content
-            content_widget.update(output)
-        except Exception as e:
-            content_widget.update(f"[red]Error: {e}[/red]")
-
-    def _format_observations(self, observations: list) -> str:
-        if not observations: return "No observations found."
-        return "\n".join([f"{o.observation_timestamp.strftime('%Y-%m-%d')}: [bold]{o.value}[/bold]" for o in observations])
-
-    def _format_relations(self, relations: list) -> str:
-        if not relations: return "No relations found."
-        return "\n".join([f"-> {r.id} ([italic]{r.relationship}[/italic])" for r in relations])
-
-    def _format_series_list(self, series_list: list) -> str:
-        if not series_list: return "No associated series found."
-        return "\n".join([f"- {s.label} ([blue]{s.id}[/blue])" for s in series_list])
-
-
-class ResultsScreen(ModalScreen):
-    """A modal for displaying query results."""
-    
-    DEFAULT_CSS = """
-    ResultsScreen {
-        align: center middle;
-    }
-
-    #results-container {
-        width: 90%;
-        height: 90%;
-        border: thick $magenta;
-        background: $surface;
-        padding: 1 2;
-    }
-
-    #results-table {
-        height: 1fr;
-        overflow-y: scroll;
-    }
-    """
-
-    def __init__(self, observations: list):
-        super().__init__()
-        self.observations = observations
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="results-container"):
-            yield Static("[bold magenta]Query Results[/bold magenta]\n" + "-"*20)
-            yield Static(id="results-table")
-            yield Button("Close (Esc)", variant="error", id="close-btn")
-
-    def on_mount(self) -> None:
-        table = self.query_one("#results-table")
-        lines = [f"[bold]{'Date':<15} {'Series ID':<15} {'Value':<10}[/bold]", "-" * 45]
-        for o in self.observations:
-            date_str = o.observation_timestamp.strftime('%Y-%m-%d')
-            lines.append(f"{date_str:<15} {o.series_id:<15} {o.value:<10}")
-        table.update("\n".join(lines))
-
-    @on(Button.Pressed, "#close-btn")
-    def on_close(self) -> None:
-        self.app.pop_screen()
-
-
-class ResultItem(ListItem):
+class SearchResultRow(ListItem):
+    """A row in the search results list."""
     def __init__(self, resource: any):
         super().__init__()
         self.resource = resource
-        if isinstance(resource, Series):
-            self.label = f"[blue]Series:[/blue] {resource.label} ({resource.id})"
-        elif isinstance(resource, Entity):
-            self.label = f"[green]Entity:[/green] {resource.label} ({resource.id})"
-        elif isinstance(resource, Metric):
-            self.label = f"[yellow]Metric:[/yellow] {resource.name} ({resource.id})"
-        else:
-            self.label = str(resource)
 
     def compose(self) -> ComposeResult:
-        yield Label(self.label)
+        res = self.resource
+        name = getattr(res, "label", getattr(res, "name", "Unknown"))
+        res_type = "SERIES" if isinstance(res, Series) else "ENTITY" if isinstance(res, Entity) else "METRIC"
+        source = getattr(res, "source", "N/A")
+        
+        yield Horizontal(
+            Label(f"{name}", classes="col-name"),
+            Label(f"{res.id[:15]:<15}", classes="col-id"),
+            Label(f"{source[:10]:<10}", classes="col-src"),
+            Label(f"{res_type:<10}", classes="col-type"),
+        )
 
-class JSTDataApp(App):
-    """A Textual app for exploring Jefferson Street data."""
+class BasketHeader(ListItem):
+    """A header in the staging basket list."""
+    def __init__(self, title: str):
+        super().__init__(disabled=True)
+        self.title = title
 
-    CSS = """
-    Screen {
-        background: $surface;
+    def compose(self) -> ComposeResult:
+        yield Label(self.title, classes="basket-header-label")
+
+class BasketItem(ListItem):
+    """An item in the staging basket."""
+    def __init__(self, resource: any):
+        super().__init__()
+        self.resource = resource
+
+    def compose(self) -> ComposeResult:
+        res = self.resource
+        name = getattr(res, "label", getattr(res, "name", "Unknown"))
+        subtext = f"{getattr(res, 'source', 'API')} // {getattr(res, 'frequency', 'DATA')}"
+        
+        with Horizontal():
+            with Vertical():
+                yield Label(f"[bold]{name}[/bold]", classes="basket-item-name")
+                yield Label(subtext, classes="basket-item-subtext")
+            yield Button("X", variant="error", classes="remove-btn")
+
+class InspectorResultRow(ListItem):
+    """A row in the inspector results list."""
+    def __init__(self, resource: any):
+        super().__init__()
+        self.resource = resource
+
+    def compose(self) -> ComposeResult:
+        res = self.resource
+        
+        if isinstance(res, EntityRelationship):
+            name = getattr(res, "target_label", getattr(res, "target_name", res.id)) or ""
+            item_id = res.id
+            type_str = "REL_ENTITY"
+        elif isinstance(res, Entity):
+            name = getattr(res, "label", getattr(res, "name", res.id)) or ""
+            item_id = res.id
+            type_str = "ENTITY"
+        elif isinstance(res, Metric):
+            name = getattr(res, "label", getattr(res, "name", res.id)) or ""
+            item_id = res.id
+            type_str = "METRIC"
+        elif isinstance(res, Series):
+            name = getattr(res, "label", getattr(res, "name", res.id)) or ""
+            item_id = res.id
+            type_str = "SERIES"
+        else:
+            name = str(res)
+            item_id = "N/A"
+            type_str = "UNKNOWN"
+            
+        yield Horizontal(
+            Label(f"{type_str:<12}", classes="insp-col-type"),
+            Label(f"{name[:25]:<25}", classes="insp-col-name"),
+            Label(f"{item_id[:15]:<15}", classes="insp-col-id"),
+        )
+
+# --- Screens ---
+
+class WorkspaceScreen(Screen):
+    """The main research workspace (Tab 1)."""
+    
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="workspace-body"):
+            with Vertical(id="left-column"):
+                with Vertical(classes="pane-container", id="results-pane"):
+                    yield Label("RESULTS // SEARCH_MATCHES", classes="pane-header")
+                    with Horizontal(classes="table-header"):
+                        yield Label("NAME", classes="col-name")
+                        yield Label("ID", classes="col-id")
+                        yield Label("SRC", classes="col-src")
+                        yield Label("TYPE", classes="col-type")
+                    yield ListView(id="results-list")
+                
+                with Vertical(classes="pane-container", id="inspector-pane"):
+                    yield Label("INSPECTOR // DATA_DETAILS", classes="pane-header")
+                    with Vertical(id="inspector-default-view"):
+                        yield Static(id="inspector-content", content="Highlight an item and press 'i' to inspect.")
+                    with Vertical(id="inspector-interactive-view"):
+                        yield Label("", id="inspector-meta")
+                        yield Label("", id="inspector-search-status")
+                        yield Input(placeholder="Search related entities/metrics...", id="inspector-search-input")
+                        yield ListView(id="inspector-results-list")
+            
+            with Vertical(id="right-column", classes="pane-container"):
+                yield ListView(id="basket-list")
+                with Vertical(id="basket-summary"):
+                    with Horizontal():
+                        with Vertical():
+                            yield Label("TOTAL SERIES", classes="stat-label")
+                            yield Label("0", id="stat-series", classes="stat-value")
+                        with Vertical():
+                            yield Label("EST. OBS.", classes="stat-label")
+                            yield Label("0", id="stat-obs", classes="stat-value")
+        
+        with Horizontal(id="cmd-bar"):
+            yield Label(">", id="cmd-prompt")
+            yield Input(placeholder="SEARCH_DATABASE (ENTITY | METRIC | DATASET) ...", id="search-input")
+            yield Label("Press [bold]?[/bold] for keybindings // [bold]ctrl+e[/bold] to run", id="help-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#search-input").focus()
+        self.app._rebuild_basket_list()
+
+class ExplorerScreen(Screen):
+    """The result viewer (Tab 2)."""
+    
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Label("EXPLORER // DATA_VIEW", classes="pane-header")
+        with Horizontal(id="explorer-body"):
+            yield DataTable(id="explorer-table")
+            with Vertical(id="explorer-sidebar", classes="pane-container"):
+                yield Label("EXPORT // PYTHON_CODE", classes="sidebar-header")
+                yield Static(id="python-code-display", classes="code-display")
+                yield Button("COPY PYTHON", id="copy-python-btn", variant="primary")
+                
+                yield Label("EXPORT // CLI_COMMAND", classes="sidebar-header")
+                yield Static(id="cli-command-display", classes="code-display")
+                yield Button("COPY CLI", id="copy-cli-btn", variant="primary")
+                
+        with Horizontal(id="explorer-footer"):
+            yield Label("RUNNING", id="explorer-status")
+            yield Label("ROWS: 0", id="explorer-count")
+            yield Label("BACK TO WORKSPACE (ESC)", id="explorer-hint")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._generate_query_representations()
+        self.run_query()
+
+    def _generate_query_representations(self) -> None:
+        app = self.app
+        m_ids = [r.id for r in app.basket if isinstance(r, Metric)]
+        e_ids = [r.id for r in app.basket if isinstance(r, Entity)]
+        s_ids = [r.id for r in app.basket if isinstance(r, Series)]
+        
+        # Behind the scenes JSON representation
+        query_json = {}
+        if m_ids:
+            query_json["metric"] = m_ids
+        if e_ids:
+            query_json["entity"] = e_ids
+        if s_ids:
+            query_json["series"] = s_ids
+            
+        self.query_json_str = json.dumps(query_json, indent=2)
+        
+        # Python representation
+        py_args = []
+        if m_ids:
+            py_args.append(f"    metric={m_ids}")
+        if e_ids:
+            py_args.append(f"    entity={e_ids}")
+        if s_ids:
+            py_args.append(f"    series={s_ids}")
+            
+        py_args_str = ",\n".join(py_args)
+        self.python_code = f"""from jstdata import JSTDataClient
+
+client = JSTDataClient()
+df = client.query_df(
+{py_args_str}
+)
+print(df)"""
+
+        # CLI representation
+        cli_parts = ["jst query"]
+        for m in m_ids:
+            cli_parts.append(f"--metric {m}")
+        for e in e_ids:
+            cli_parts.append(f"--entity {e}")
+        for s in s_ids:
+            cli_parts.append(f"--series {s}")
+        self.cli_command = " ".join(cli_parts)
+        
+        # Update static displays
+        self.query_one("#python-code-display", Static).update(self.python_code)
+        self.query_one("#cli-command-display", Static).update(self.cli_command)
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        import subprocess
+        import sys
+        if sys.platform == "darwin":
+            try:
+                subprocess.run(["pbcopy"], input=text, text=True, check=True)
+                return
+            except Exception:
+                pass
+        try:
+            self.app.copy_to_clipboard(text)
+        except Exception:
+            pass
+
+    @on(Button.Pressed, "#copy-python-btn")
+    def copy_python_code(self) -> None:
+        self._copy_to_clipboard(self.python_code)
+        self.notify("Python snippet copied to clipboard!")
+
+    @on(Button.Pressed, "#copy-cli-btn")
+    def copy_cli_command(self) -> None:
+        self._copy_to_clipboard(self.cli_command)
+        self.notify("CLI command copied to clipboard!")
+
+    @work(exclusive=True)
+    async def run_query(self) -> None:
+        table = self.query_one("#explorer-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("DATE", "ENTITY_ID", "METRIC_ID", "VALUE", "SOURCE")
+        
+        app = self.app
+        m_ids = [r.id for r in app.basket if isinstance(r, Metric)]
+        e_ids = [r.id for r in app.basket if isinstance(r, Entity)]
+        s_ids = [r.id for r in app.basket if isinstance(r, Series)]
+        
+        try:
+            observations = await asyncio.to_thread(
+                app.client.query,
+                metric=m_ids or None,
+                entity=e_ids or None,
+                series=s_ids or None,
+                limit=100
+            )
+            
+            if not observations:
+                self.notify("No results found", severity="warning")
+                self.query_one("#explorer-status").update("NO RESULTS")
+            else:
+                observations = sorted(observations, key=lambda o: o.observation_timestamp)
+                for o in observations:
+                    table.add_row(
+                        o.observation_timestamp.strftime("%Y-%m-%d"),
+                        getattr(o, "entity_id", "N/A"),
+                        getattr(o, "metric_id", "N/A"),
+                        f"{o.value:,.4f}",
+                        "API"
+                    )
+                self.query_one("#explorer-status").update("READY")
+            
+            self.query_one("#explorer-count").update(f"ROWS: {len(observations)}")
+        except Exception as e:
+            self.notify(f"Query error: {e}", severity="error")
+            self.query_one("#explorer-status").update("ERROR")
+
+class HelpScreen(ModalScreen):
+    """A modal screen showing keybindings help."""
+    
+    DEFAULT_CSS = """
+    HelpScreen {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.7);
     }
 
-    #search-container {
-        height: 5;
-        margin: 1 1;
-    }
-
-    #search-status {
-        margin-left: 2;
-        height: 1;
-    }
-
-    #main-container {
-        height: 1fr;
-    }
-
-    #results-list {
-        width: 50%;
-        height: 1fr;
-        border: solid $primary;
-        margin: 0 1;
-    }
-
-    #query-builder {
-        width: 50%;
-        height: 1fr;
-        border: solid $accent;
+    #help-container {
+        width: 50;
+        height: auto;
+        border: thick #4ade80;
+        background: #111111;
         padding: 1 2;
-        background: $surface-darken-1;
+    }
+
+    #help-title {
+        text-style: bold;
+        color: #4ade80;
+        margin-bottom: 1;
+        text-align: center;
+    }
+
+    .key-row {
+        height: 1;
+        margin-bottom: 0;
+    }
+
+    .key-col {
+        color: #4ade80;
+        text-style: bold;
+        width: 15;
+    }
+
+    .desc-col {
+        color: #e0e0e0;
+        width: 30;
+    }
+
+    #help-close-btn {
+        margin-top: 1;
+        width: 100%;
     }
     """
 
     BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
-        ("ctrl+c", "quit", "Quit"),
-        ("q", "run_query", "Run Query"),
-        ("x", "clear_query", "Clear Query"),
-        ("i", "inspect", "Inspect"),
-        ("c", "copy_id", "Copy ID"),
-        ("p", "copy_python", "Copy Python Snippet"),
-        ("j", "cursor_down", "Down"),
-        ("k", "cursor_up", "Up"),
+        ("escape", "dismiss", "Dismiss"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-container"):
+            yield Label("KEYBINDINGS // HELPMENU", id="help-title")
+            
+            yield Horizontal(Label("q / ctrl+c", classes="key-col"), Label("Quit application", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("ctrl+e", classes="key-col"), Label("Execute query (reliable)", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("shift+enter", classes="key-col"), Label("Execute query (if supported)", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("i", classes="key-col"), Label("Inspect selected item", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("escape", classes="key-col"), Label("Back to workspace", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("enter (search)", classes="key-col"), Label("Focus search results", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("enter (results)", classes="key-col"), Label("Add item to basket", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("backspace", classes="key-col"), Label("Remove item from basket", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("j / ↓", classes="key-col"), Label("Move highlight down", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("k / ↑", classes="key-col"), Label("Move highlight up", classes="desc-col"), classes="key-row")
+            yield Horizontal(Label("?", classes="key-col"), Label("Show this help menu", classes="desc-col"), classes="key-row")
+
+            yield Button("CLOSE (ESC)", variant="error", id="help-close-btn")
+
+    def action_dismiss(self) -> None:
+        self.dismiss()
+
+# --- Main App ---
+
+class JSTDataApp(App):
+    """Jefferson Street Research OS - TUI v2."""
+    
+    CSS = """
+    Screen {
+        background: #0a0a0a;
+        color: #e0e0e0;
+    }
+
+    /* Layout Containers */
+    #workspace-body {
+        height: 1fr;
+    }
+    #left-column {
+        width: 65%;
+    }
+    #right-column {
+        width: 35%;
+        border-left: solid #333;
+    }
+
+    .pane-container {
+        border: solid #222;
+        background: #0f0f0f;
+    }
+    #results-pane { height: 60%; }
+    #inspector-pane { height: 40%; border-top: solid #333; }
+
+    /* Headers */
+    .pane-header {
+        background: #1a1a1a;
+        color: #4ade80;
+        padding: 0 1;
+        text-style: bold;
+        height: 1;
+    }
+    .table-header {
+        height: 1;
+        background: #111;
+        border-bottom: solid #333;
+        padding: 0 1;
+    }
+    .table-header Label {
+        color: #888;
+        text-style: bold;
+    }
+
+    /* Columns */
+    .col-name { width: 55%; }
+    .col-id   { width: 25%; }
+    .col-src  { width: 10%; }
+    .col-type { width: 10%; }
+
+    /* List Items */
+    SearchResultRow {
+        padding: 0 1;
+        height: 1;
+    }
+    SearchResultRow:focus {
+        background: #1a3a1a;
+        color: #4ade80;
+    }
+
+    /* Basket */
+    #basket-list {
+        height: 1fr;
+    }
+    BasketHeader {
+        background: #1a1a1a;
+        padding: 0 1;
+        height: 1;
+    }
+    BasketHeader .basket-header-label {
+        color: #4ade80 !important;
+        text-style: bold;
+    }
+    BasketItem {
+        padding: 1 1;
+        border-bottom: solid #222;
+        height: 4;
+    }
+    .basket-item-name { color: #fff; }
+    .basket-item-subtext { color: #666; }
+    .remove-btn { min-width: 3; height: 1; margin-top: 1; }
+
+    /* Summary */
+    #basket-summary {
+        height: 6;
+        padding: 1 2;
+        background: #151515;
+        border-top: solid #333;
+    }
+    .stat-label { color: #888; }
+    .stat-value { color: #4ade80; text-style: bold; margin-bottom: 1; }
+
+    /* CMD Bar */
+    #cmd-bar {
+        height: 3;
+        background: #0f0f0f;
+        border-top: solid #4ade80;
+        align: left middle;
+    }
+    #cmd-prompt { color: #4ade80; padding: 0 1; text-style: bold; }
+    #search-input {
+        width: 1fr;
+        background: transparent;
+        border: none;
+    }
+    #help-hint {
+        color: #888;
+        margin-right: 2;
+    }
+    #status-labels {
+        width: auto;
+        padding: 0 2;
+    }
+    .status-item {
+        margin-left: 2;
+        color: #888;
+    }
+
+    /* Inspector Interactive View CSS */
+    #inspector-default-view {
+        height: 1fr;
+        padding: 1 2;
+    }
+    #inspector-interactive-view {
+        display: none;
+        height: 1fr;
+        padding: 0 1;
+    }
+    #inspector-meta {
+        color: #4ade80;
+        text-style: bold;
+        height: 1;
+        margin-bottom: 0;
+    }
+    #inspector-search-status {
+        color: #eab308;
+        height: 1;
+        margin-bottom: 0;
+    }
+    #inspector-search-input {
+        background: #111;
+        border: none;
+        height: 3;
+        margin-bottom: 0;
+    }
+    #inspector-results-list {
+        height: 1fr;
+        background: #0f0f0f;
+    }
+    .insp-col-type { width: 12; color: #888; }
+    .insp-col-name { width: 25; color: #fff; }
+    .insp-col-id   { width: 15; color: #4ade80; }
+    InspectorResultRow {
+        padding: 0 1;
+        height: 1;
+    }
+    InspectorResultRow:focus {
+        background: #1a3a1a;
+        color: #4ade80;
+    }
+
+    /* Explorer */
+    #explorer-body {
+        height: 1fr;
+    }
+    #explorer-table {
+        width: 65%;
+        height: 100%;
+    }
+    #explorer-sidebar {
+        width: 35%;
+        height: 100%;
+        border-left: solid #333;
+        padding: 1 2;
+        background: #0f0f0f;
+    }
+    .sidebar-header {
+        background: #1a1a1a;
+        color: #4ade80;
+        padding: 0 1;
+        text-style: bold;
+        height: 1;
+        margin-top: 1;
+        margin-bottom: 0;
+    }
+    .code-display {
+        background: #050505;
+        color: #f8f8f2;
+        padding: 1 1;
+        height: 8;
+        border: solid #222;
+        margin-bottom: 1;
+        overflow-y: scroll;
+    }
+    #explorer-sidebar Button {
+        margin-bottom: 1;
+        width: 100%;
+    }
+    #explorer-footer {
+        height: 1;
+        background: #111;
+        color: #4ade80;
+        padding: 0 2;
+    }
+    """
+
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("ctrl+c", "quit", "Quit"),
+        Binding("i", "inspect", "Inspect"),
+        Binding("escape", "back", "Back"),
+        Binding("ctrl+e", "execute_query", "Execute Query"),
+        Binding("shift+enter", "execute_query", "Execute Query"),
+        Binding("backspace", "remove_basket_item", "Remove Basket Item"),
+        Binding("j", "cursor_down", "Cursor Down", show=False),
+        Binding("k", "cursor_up", "Cursor Up", show=False),
+        Binding("question_mark", "show_help", "Show Keybindings", key_display="?"),
     ]
 
     def __init__(self, client: JSTDataClient):
         super().__init__()
         self.client = client
+        self.basket = []
         self.search_task = None
-        self._search_debounce_time = 0.3
-        self.query_state = {"metrics": [], "entities": [], "series": []}
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Container(
-            Input(placeholder="Search metrics, entities, or series...", id="search-input"),
-            Static("", id="search-status"),
-            id="search-container"
-        )
-        yield Horizontal(
-            ListView(id="results-list"),
-            Static(id="query-builder", content="Enter on a result to add to query..."),
-            id="main-container"
-        )
-        yield Footer()
+        self.inspector_search_task = None
+        self.preloaded_entities = []
+        self.preloaded_metrics = []
+        self.preloaded_series = []
+        self.large_search_space = False
+        self.current_inspected_resource = None
 
     def on_mount(self) -> None:
-        self.query_one("#search-input").focus()
+        self.push_screen(WorkspaceScreen())
+
+    # --- Actions ---
+
+    def action_inspect(self) -> None:
+        """Fetch deep details for highlighted item."""
+        list_view = self.query_one("#results-list", ListView)
+        if list_view.highlighted_child:
+            resource = list_view.highlighted_child.resource
+            self._start_inspector_search(resource)
+
+    def action_back(self) -> None:
+        """Return to workspace or unfocus inspector."""
+        if isinstance(self.screen, ExplorerScreen):
+            self.pop_screen()
+        elif self.focused and self.focused.id in ("inspector-search-input", "inspector-results-list"):
+            self.query_one("#search-input").focus()
+
+    def action_execute_query(self) -> None:
+        """Execute the query for the staging basket."""
+        if not self.basket:
+            self.notify("Basket is empty", severity="warning")
+            return
+        self.push_screen(ExplorerScreen())
+
+    def action_show_help(self) -> None:
+        """Show the keybindings help screen."""
+        self.push_screen(HelpScreen())
+
+    def action_remove_basket_item(self) -> None:
+        """Remove the highlighted item in the active basket list."""
+        try:
+            basket_list = self.query_one("#basket-list", ListView)
+        except Exception:
+            return
+        if basket_list.has_focus and basket_list.highlighted_child:
+            item_widget = basket_list.highlighted_child  # BasketItem
+            if isinstance(item_widget, BasketItem):
+                resource = item_widget.resource
+                self.basket = [i for i in self.basket if i.id != resource.id]
+                self._rebuild_basket_list()
+                self._update_stats()
+                self.notify("Removed from basket")
+                return
+
+    def action_cursor_down(self) -> None:
+        """Move cursor/highlight down in the currently focused list or component."""
+        focused = self.focused
+        if focused and hasattr(focused, "action_cursor_down"):
+            focused.action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        """Move cursor/highlight up in the currently focused list or component."""
+        focused = self.focused
+        if focused and hasattr(focused, "action_cursor_up"):
+            focused.action_cursor_up()
+
+    # --- Search Logic ---
 
     @on(Input.Changed, "#search-input")
-    def on_search(self, event: Input.Changed) -> None:
+    def on_search_changed(self, event: Input.Changed) -> None:
         if self.search_task:
             self.search_task.cancel()
-        
-        status = self.query_one("#search-status")
         if len(event.value) < 2:
-            self.query_one("#results-list").clear()
-            status.update("")
+            self.query_one("#results-list", ListView).clear()
             return
+        self.search_task = asyncio.create_task(self._do_search(event.value))
 
-        status.update("[italic]Waiting...[/italic]")
-        self.search_task = asyncio.create_task(self._debounced_search(event.value))
-
-    async def _debounced_search(self, query: str) -> None:
+    async def _do_search(self, query: str) -> None:
         try:
-            await asyncio.sleep(self._search_debounce_time)
-            await self.perform_search(query)
-            self.query_one("#search-status").update("")
-        except asyncio.CancelledError:
-            pass
-
-    async def perform_search(self, query: str) -> None:
-        try:
-            results = await asyncio.to_thread(self.client.search, query, limit=15)
-            
-            list_view = self.query_one("#results-list")
+            await asyncio.sleep(0.3)
+            results = await asyncio.to_thread(self.client.search, query, limit=20)
+            list_view = self.query_one("#results-list", ListView)
             list_view.clear()
             for r in results:
-                list_view.append(ResultItem(r))
+                list_view.append(SearchResultRow(r))
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             self.notify(f"Search error: {e}", severity="error")
 
     @on(Input.Submitted, "#search-input")
-    def on_search_submitted(self) -> None:
-        self.query_one("#results-list").focus()
+    def on_search_submit(self) -> None:
+        self.query_one("#results-list", ListView).focus()
 
-    def action_cursor_down(self) -> None:
-        self.query_one("#results-list").action_cursor_down()
-
-    def action_cursor_up(self) -> None:
-        self.query_one("#results-list").action_cursor_up()
+    # --- Interaction Logic ---
 
     @on(ListView.Selected, "#results-list")
-    def on_item_selected(self, event: ListView.Selected) -> None:
+    def add_to_basket(self, event: ListView.Selected) -> None:
         resource = event.item.resource
-        category = "metrics" if isinstance(resource, Metric) else "entities" if isinstance(resource, Entity) else "series" if isinstance(resource, Series) else None
-        
-        if category and resource.id not in [r.id for r in self.query_state[category]]:
-            self.query_state[category].append(resource)
-            self._update_query_builder()
-            self.notify(f"Added to query")
+        if resource.id not in [i.id for i in self.basket]:
+            self.basket.append(resource)
+            self._rebuild_basket_list()
+            self.notify("Added to basket")
+            self._update_stats()
 
-    def action_inspect(self) -> None:
-        list_view = self.query_one("#results-list")
-        if list_view.highlighted_child:
-            self.push_screen(InspectScreen(list_view.highlighted_child.resource, self.client))
+    @on(Button.Pressed, ".remove-btn")
+    def remove_from_basket(self, event: Button.Pressed) -> None:
+        item_widget = event.button.parent.parent # BasketItem
+        resource = item_widget.resource
+        self.basket = [i for i in self.basket if i.id != resource.id]
+        self._rebuild_basket_list()
+        self._update_stats()
 
-    def action_run_query(self) -> None:
-        asyncio.create_task(self._run_query())
 
-    async def _run_query(self) -> None:
-        m_ids = [m.id for m in self.query_state["metrics"]]
-        e_ids = [e.id for e in self.query_state["entities"]]
-        s_ids = [s.id for s in self.query_state["series"]]
-        
-        if not (m_ids or e_ids or s_ids):
-            self.notify("Add items to query first!", severity="warning")
-            return
 
+    # --- Helper Methods ---
+    
+    def _rebuild_basket_list(self) -> None:
         try:
-            obs = await asyncio.to_thread(self.client.query, metric=m_ids or None, entity=e_ids or None, series=s_ids or None, limit=50)
-            if obs:
-                self.push_screen(ResultsScreen(obs))
-            else:
-                self.notify("No results found")
+            basket_list = self.query_one("#basket-list", ListView)
+        except Exception:
+            return
+        
+        # Save the current highlighted item's resource ID so we can restore the highlight
+        old_highlighted_id = None
+        if basket_list.highlighted_child and isinstance(basket_list.highlighted_child, BasketItem):
+            old_highlighted_id = basket_list.highlighted_child.resource.id
+            
+        basket_list.clear()
+        
+        # Add Metrics & Series Header
+        basket_list.append(BasketHeader("STAGING_BASKET // METRICS & SERIES"))
+        
+        # Add Metrics & Series items
+        for item in self.basket:
+            if not isinstance(item, Entity):
+                basket_list.append(BasketItem(item))
+                
+        # Add Entities Header
+        basket_list.append(BasketHeader("STAGING_BASKET // ENTITIES"))
+        
+        # Add Entity items
+        for item in self.basket:
+            if isinstance(item, Entity):
+                basket_list.append(BasketItem(item))
+                
+        # Restore highlight if possible
+        if old_highlighted_id is not None:
+            for index, child in enumerate(basket_list.children):
+                if isinstance(child, BasketItem) and child.resource.id == old_highlighted_id:
+                    basket_list.index = index
+                    break
+
+    def _update_stats(self) -> None:
+        # Mocking for now as per point (3)
+        self.query_one("#stat-series").update(str(len(self.basket)))
+        self.query_one("#stat-obs").update("---")
+
+    def _start_inspector_search(self, resource: any) -> None:
+        """Switch view to inspector interactive search and begin prefetch."""
+        self.query_one("#inspector-default-view").styles.display = "none"
+        self.query_one("#inspector-interactive-view").styles.display = "block"
+        
+        meta_label = self.query_one("#inspector-meta")
+        res_type = "SERIES" if isinstance(resource, Series) else "ENTITY" if isinstance(resource, Entity) else "METRIC"
+        name = getattr(resource, "label", getattr(resource, "name", "Unknown"))
+        meta_label.update(f"{name.upper()} // {res_type} // ID: {resource.id}")
+        
+        self.query_one("#inspector-search-status").update("")
+        self.query_one("#inspector-search-input").value = ""
+        self.query_one("#inspector-results-list", ListView).clear()
+        
+        self.query_one("#inspector-search-input").focus()
+        
+        self.current_inspected_resource = resource
+        self.run_inspector_prefetch(resource)
+
+    @work(exclusive=True)
+    async def run_inspector_prefetch(self, resource: any) -> None:
+        """Fetch relations & metrics/series to determine search space size."""
+        status_label = self.query_one("#inspector-search-status")
+        status_label.update("[italic green]Fetching related items...[/italic green]")
+        
+        self.preloaded_entities = []
+        self.preloaded_metrics = []
+        self.preloaded_series = []
+        self.large_search_space = False
+        
+        try:
+            if isinstance(resource, Entity):
+                relations = await asyncio.to_thread(self.client.get_entity_relations, resource.id, limit=201)
+                metrics = await asyncio.to_thread(self.client.search_metrics, "", entity=resource.id, limit=201)
+                
+                self.preloaded_entities = relations
+                self.preloaded_metrics = metrics
+                
+                if len(relations) > 200 or len(metrics) > 200:
+                    self.large_search_space = True
+                    status_label.update("[yellow]Large search space (>200 items); server search active[/yellow]")
+                else:
+                    status_label.update("")
+                    
+            elif isinstance(resource, Metric):
+                series = await asyncio.to_thread(self.client.get_metric_series, resource.id, limit=201)
+                entities = await asyncio.to_thread(self.client.search_entities, "", metric=resource.id, limit=201)
+                
+                self.preloaded_series = series
+                self.preloaded_entities = entities
+                
+                if len(series) > 200 or len(entities) > 200:
+                    self.large_search_space = True
+                    status_label.update("[yellow]Large search space (>200 items); server search active[/yellow]")
+                else:
+                    status_label.update("")
+            elif isinstance(resource, Series):
+                # Leaf level Series details
+                self.preloaded_series = [resource]
+                status_label.update("")
+                
+            self._update_inspector_results("", initial=True)
+            
         except Exception as e:
-            self.notify(f"Query error: {e}", severity="error")
+            status_label.update(f"[red]Error prefetching: {e}[/red]")
 
-    def action_clear_query(self) -> None:
-        self.query_state = {"metrics": [], "entities": [], "series": []}
-        self._update_query_builder()
+    @on(Input.Changed, "#inspector-search-input")
+    def on_inspector_search_changed(self, event: Input.Changed) -> None:
+        """Trigger search when input in inspector changes."""
+        if self.inspector_search_task:
+            self.inspector_search_task.cancel()
+        self.inspector_search_task = asyncio.create_task(self._do_inspector_search(event.value))
 
-    def _update_query_builder(self) -> None:
-        builder = self.query_one("#query-builder")
-        lines = ["[bold magenta]Query Builder[/bold magenta]", "-"*20]
-        for cat in ["metrics", "entities", "series"]:
-            if self.query_state[cat]:
-                lines.append(f"\n[bold]{cat.title()}:[/bold]")
-                lines.extend([f"- {getattr(i, 'label', getattr(i, 'name', ''))} ({i.id})" for i in self.query_state[cat]])
-        builder.update("\n".join(lines) if any(self.query_state.values()) else "\n[italic]Enter on a result to add to query...[/italic]")
+    async def _do_inspector_search(self, query: str) -> None:
+        try:
+            await asyncio.sleep(0.3)
+            resource = self.current_inspected_resource
+            if not resource:
+                return
+                
+            if self.large_search_space and len(query) >= 2:
+                self.query_one("#inspector-search-status").update("[italic green]Searching server...[/italic green]")
+                if isinstance(resource, Entity):
+                    # Search metrics for this entity
+                    metrics = await asyncio.to_thread(self.client.search_metrics, query, entity=resource.id, limit=50)
+                    local_relations = [
+                        r for r in self.preloaded_entities
+                        if query.lower() in (getattr(r, "id", "") or "").lower() or query.lower() in r.id.lower()
+                    ]
+                    self._update_inspector_list(local_relations, metrics)
+                elif isinstance(resource, Metric):
+                    # Search entities for this metric
+                    entities = await asyncio.to_thread(self.client.search_entities, query, metric=resource.id, limit=50)
+                    local_series = [
+                        s for s in self.preloaded_series
+                        if query.lower() in (getattr(s, "label", "") or "").lower() or query.lower() in s.id.lower()
+                    ]
+                    self._update_inspector_list(entities, local_series)
+                self.query_one("#inspector-search-status").update("[yellow]Large search space (>200 items); server search active[/yellow]")
+            else:
+                self._update_inspector_results(query)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.query_one("#inspector-search-status").update(f"[red]Search error: {e}[/red]")
 
-    def action_copy_id(self) -> None:
-        list_view = self.query_one("#results-list")
-        if list_view.highlighted_child:
-            import pyperclip
-            pyperclip.copy(list_view.highlighted_child.resource.id)
-            self.notify("Copied ID")
+    def _update_inspector_results(self, query: str, initial: bool = False) -> None:
+        query_lower = query.lower()
+        
+        filtered_entities = []
+        filtered_metrics = []
+        filtered_series = []
+        
+        for e in self.preloaded_entities:
+            if isinstance(e, EntityRelationship):
+                label = getattr(e, "target_label", getattr(e, "target_name", "")) or ""
+                item_id = e.id
+            else:
+                label = getattr(e, "label", getattr(e, "name", "")) or ""
+                item_id = e.id
+            if not query or query_lower in label.lower() or query_lower in item_id.lower():
+                filtered_entities.append(e)
+                
+        for m in self.preloaded_metrics:
+            label = getattr(m, "label", getattr(m, "name", "")) or ""
+            item_id = m.id
+            if not query or query_lower in label.lower() or query_lower in item_id.lower():
+                filtered_metrics.append(m)
+                
+        for s in self.preloaded_series:
+            label = getattr(s, "label", getattr(s, "name", "")) or ""
+            item_id = s.id
+            if not query or query_lower in label.lower() or query_lower in item_id.lower():
+                filtered_series.append(s)
+                
+        self._update_inspector_list(filtered_entities, filtered_metrics, filtered_series)
 
-    def action_copy_python(self) -> None:
-        list_view = self.query_one("#results-list")
-        if list_view.highlighted_child:
-            import pyperclip
-            r = list_view.highlighted_child.resource
-            snippet = f"client.query_df(series='{r.id}')" if isinstance(r, Series) else f"client.get_entity_series('{r.id}')" if isinstance(r, Entity) else f"client.get_metric_series('{r.id}')"
-            pyperclip.copy(snippet)
-            self.notify("Copied Python snippet")
+    def _update_inspector_list(self, *lists) -> None:
+        results_list = self.query_one("#inspector-results-list", ListView)
+        results_list.clear()
+        
+        count = 0
+        for lst in lists:
+            for item in lst:
+                results_list.append(InspectorResultRow(item))
+                count += 1
+                if count >= 100:
+                    break
+            if count >= 100:
+                break
+
+    @on(Input.Submitted, "#inspector-search-input")
+    def on_inspector_search_submit(self) -> None:
+        """Move focus to results list when Enter is pressed in search input."""
+        self.query_one("#inspector-results-list", ListView).focus()
+
+    @on(ListView.Selected, "#inspector-results-list")
+    def on_inspector_item_selected(self, event: ListView.Selected) -> None:
+        self.add_inspector_item_to_basket(event.item.resource)
+
+    @work(exclusive=True)
+    async def add_inspector_item_to_basket(self, item: any) -> None:
+        try:
+            if isinstance(item, EntityRelationship):
+                resource = await asyncio.to_thread(self.client.get_entity, item.id)
+            elif isinstance(item, (Series, Entity, Metric)):
+                resource = item
+            else:
+                return
+                
+            if resource.id not in [i.id for i in self.basket]:
+                self.basket.append(resource)
+                self._rebuild_basket_list()
+                self.notify(f"Added {resource.id} to basket")
+                self._update_stats()
+            else:
+                self.notify(f"{resource.id} is already in basket", severity="warning")
+        except Exception as e:
+            self.notify(f"Error adding to basket: {e}", severity="error")
+
+
+
+if __name__ == "__main__":
+    client = JSTDataClient()
+    app = JSTDataAppV2(client)
+    app.run()
