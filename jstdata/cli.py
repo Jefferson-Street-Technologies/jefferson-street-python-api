@@ -78,7 +78,7 @@ def config_show(verbose):
 @click.argument("value")
 def config_set(key, value):
     """
-    Update a configuration value.
+    Update a configuration value. Valid keys are "api_key" and "base_url".
     """
     client._cfg.write(**{key: value})
     click.echo(f"Set {key} to {value}")
@@ -231,6 +231,15 @@ def tui():
     """
     from .tui import JSTDataApp
     app = JSTDataApp(client)
+    app.run()
+
+@cli.command()
+def tui2():
+    """
+    Launch the new high-density TUI workbench (v2).
+    """
+    from .tui2 import JSTDataAppV2
+    app = JSTDataAppV2(client)
     app.run()
 
 if __name__ == "__main__":

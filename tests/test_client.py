@@ -36,6 +36,7 @@ def client(mock_url):
 def test_client_init_no_api_key(monkeypatch, tmp_path):
     """Test that ApiKeyNotSetError is raised when no API key is provided."""
     monkeypatch.setattr("jstdata.client.APP_DIR", tmp_path)
+    monkeypatch.setattr("jstdata.client.CONFIG_FILE", tmp_path / "config.json")
     # Ensure config read returns no api key
     monkeypatch.setattr("jstdata.client.JSTDataClientConfig.read", lambda *args, **kwargs: {})
     

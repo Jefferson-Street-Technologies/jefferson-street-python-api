@@ -36,7 +36,7 @@ class Metric:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Metric":
-        return cls(id=data["id"], name=data["name"])
+        return cls(id=data["id"], name=data.get("name", data.get("label", "")))
 
 
 @dataclass(frozen=True)
@@ -54,7 +54,7 @@ class Series:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Series":
         # Handle datetime conversion
-        last_updated = data["last_updated"]
+        last_updated = data.get("last_updated")
         if isinstance(last_updated, str):
             try:
                 # API format: 2024-01-01 00:00:00 or ISO
@@ -62,21 +62,24 @@ class Series:
             except ValueError:
                 # Fallback for other potential formats
                 last_updated = datetime.strptime(last_updated, "%Y-%m-%d %H:%M:%S")
+        
+        if last_updated is None:
+            last_updated = datetime.min
 
         entities = [Entity.from_dict(e) for e in data.get("entities", [])]
 
         return cls(
             id=data["id"],
-            label=data["label"],
-            frequency=data["frequency"],
-            source=data["source"],
-            units=data["units"],
+            label=data.get("label", ""),
+            frequency=data.get("frequency", ""),
+            source=data.get("source", ""),
+            units=data.get("units", ""),
             # Handle the typo 'seasonal_adjsustment' from API spec while supporting the correct spelling
             seasonal_adjustment=data.get(
                 "seasonal_adjustment", data.get("seasonal_adjsustment", "")
             ),
             last_updated=last_updated,
-            metric_slug=data["metric_slug"],
+            metric_slug=data.get("metric_slug", ""),
             entities=entities,
         )
 

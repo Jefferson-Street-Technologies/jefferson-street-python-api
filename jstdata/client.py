@@ -272,21 +272,45 @@ class JSTDataClient:
 
     # --- Search ---
 
+    def search(
+        self, query: str, limit: int = 15, offset: int = 0
+    ) -> List[Union[Entity, Metric, Series]]:
+        """Unified search across all resource types."""
+        data = self.make_request(
+            "search", {"query": query, "limit": limit, "offset": offset}
+        )
+        results = []
+        for r in data["records"]:
+            res_type = r.get("type")
+            if res_type == "entity":
+                results.append(Entity.from_dict(r))
+            elif res_type == "metric":
+                results.append(Metric.from_dict(r))
+            elif res_type == "series":
+                results.append(Series.from_dict(r))
+        return results
+
     def search_entities(
-        self, query: str, limit: int = 5, offset: int = 0
+        self, query: str, metric: Optional[str] = None, limit: int = 5, offset: int = 0
     ) -> List[Entity]:
         """Search for entities."""
+        params = {"query": query, "limit": limit, "offset": offset}
+        if metric:
+            params["metric"] = metric
         data = self.make_request(
-            "search/entities", {"query": query, "limit": limit, "offset": offset}
+            "search/entities", params
         )
         return [Entity.from_dict(e) for e in data["records"]]
 
     def search_metrics(
-        self, query: str, limit: int = 5, offset: int = 0
+        self, query: str, entity: Optional[str] = None, limit: int = 5, offset: int = 0
     ) -> List[Metric]:
         """Search for metrics."""
+        params = {"query": query, "limit": limit, "offset": offset}
+        if entity:
+            params["entity"] = entity
         data = self.make_request(
-            "search/metrics", {"query": query, "limit": limit, "offset": offset}
+            "search/metrics", params
         )
         return [Metric.from_dict(m) for m in data["records"]]
 
