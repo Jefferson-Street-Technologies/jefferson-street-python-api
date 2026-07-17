@@ -105,6 +105,8 @@ class Observation:
     observation_timestamp: datetime
     release_timestamp: datetime
     value: float
+    entity_id: Optional[str] = None
+    metric_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Observation":
@@ -121,4 +123,6 @@ class Observation:
             observation_timestamp=obs_ts,
             release_timestamp=rel_ts,
             value=data["value"],
+            entity_id=data.get("entity_id"),
+            metric_id=data.get("metric_id"),
         )

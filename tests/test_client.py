@@ -80,9 +80,14 @@ def test_query(client, mock_url):
         "records": [
             {
                 "series_id": "ABC123",
-                "observation_timestamp": "2024-01-01T00:00:00",
-                "release_timestamp": "2024-01-01T00:00:00",
-                "value": 100.0
+                "entities": ["usa"],
+                "observations": [
+                    {
+                        "observation_timestamp": "2024-01-01T00:00:00",
+                        "release_timestamp": "2024-01-01T00:00:00",
+                        "value": 100.0
+                    }
+                ]
             }
         ]
     }
@@ -93,6 +98,7 @@ def test_query(client, mock_url):
         assert isinstance(results[0], Observation)
         assert results[0].value == 100.0
         assert results[0].series_id == "ABC123"
+        assert results[0].entity_id == "usa"
 
 
 def test_query_df(client, mock_url):
@@ -101,9 +107,14 @@ def test_query_df(client, mock_url):
         "records": [
             {
                 "series_id": "ABC123",
-                "observation_timestamp": "2024-01-01T00:00:00",
-                "release_timestamp": "2024-01-01T00:00:00",
-                "value": 100.0
+                "entities": ["usa"],
+                "observations": [
+                    {
+                        "observation_timestamp": "2024-01-01T00:00:00",
+                        "release_timestamp": "2024-01-01T00:00:00",
+                        "value": 100.0
+                    }
+                ]
             }
         ]
     }
@@ -115,3 +126,4 @@ def test_query_df(client, mock_url):
         assert not df.empty
         assert df.iloc[0]["value"] == 100.0
         assert df.iloc[0]["series_id"] == "ABC123"
+        assert df.iloc[0]["entity_id"] == "usa"

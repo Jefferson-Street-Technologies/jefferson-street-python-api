@@ -196,9 +196,11 @@ def search_series(query, limit, offset, format):
 @click.option("--frequency", type=click.Choice(["Annual", "Quarterly", "Monthly", "Daily", "Intraday"]))
 @click.option("--start-date", help="Start date (YYYY-MM-DD)")
 @click.option("--end-date", help="End date (YYYY-MM-DD)")
+@click.option("--start-time", help="Start time (unix timestamp)")
+@click.option("--end-time", help="End time (unix timestamp)")
 @click.option("--fuzzy", is_flag=True, default=True, help="Try to resolve keywords to IDs automatically")
 @common_params
-def query(metric, entity, series, frequency, start_date, end_date, fuzzy, limit, offset, format):
+def query(metric, entity, series, frequency, start_date, end_date, start_time, end_time, fuzzy, limit, offset, format):
     """
     The unified query engine. Mix and match metrics, entities, and series.
     """
@@ -218,6 +220,7 @@ def query(metric, entity, series, frequency, start_date, end_date, fuzzy, limit,
         frequency=frequency,
         start_date=start_date,
         end_date=end_date,
+        start_time=start_time,
         limit=limit,
         offset=offset
     )

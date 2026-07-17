@@ -333,6 +333,8 @@ class JSTDataClient:
         frequency: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
         limit: int = 1000,
         offset: int = 0,
     ) -> List[Observation]:
@@ -348,12 +350,29 @@ class JSTDataClient:
             "end_date": end_date,
             "limit": limit,
             "offset": offset,
+            "start_time": start_time,
+            "end_time": end_time
         }
         # Filter out None values
         params = {k: v for k, v in params.items() if v is not None}
 
         data = self.make_request("query", params)
-        return [Observation.from_dict(r) for r in data["records"]]
+        observations = []
+        for record in data.get("records", []):
+            s_id = record.get("series_id")
+            entities = record.get("entities", [])
+            entity_id = entities[0] if entities else None
+            for obs in record.get("observations", []):
+                obs_data = {
+                    "series_id": s_id,
+                    "observation_timestamp": obs.get("observation_timestamp"),
+                    "release_timestamp": obs.get("release_timestamp"),
+                    "value": obs.get("value"),
+                    "entity_id": entity_id,
+                    "metric_id": None,
+                }
+                observations.append(Observation.from_dict(obs_data))
+        return observations
 
     def query_df(self, **kwargs) -> pd.DataFrame:
         """

@@ -54,9 +54,14 @@ def test_query_direct_id(runner, mock_url):
         "records": [
             {
                 "series_id": "ABC123",
-                "observation_timestamp": "2024-01-01T00:00:00",
-                "release_timestamp": "2024-01-01T00:00:00",
-                "value": 100.0
+                "entities": ["usa"],
+                "observations": [
+                    {
+                        "observation_timestamp": "2024-01-01T00:00:00",
+                        "release_timestamp": "2024-01-01T00:00:00",
+                        "value": 100.0
+                    }
+                ]
             }
         ]
     }
@@ -78,9 +83,14 @@ def test_query_fuzzy_resolution(runner, mock_url):
         "records": [
             {
                 "series_id": "ABC123",
-                "observation_timestamp": "2024-01-01T00:00:00",
-                "release_timestamp": "2024-01-01T00:00:00",
-                "value": 100.0
+                "entities": ["usa"],
+                "observations": [
+                    {
+                        "observation_timestamp": "2024-01-01T00:00:00",
+                        "release_timestamp": "2024-01-01T00:00:00",
+                        "value": 100.0
+                    }
+                ]
             }
         ]
     }

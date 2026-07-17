@@ -6,6 +6,7 @@ from textual.binding import Binding
 from textual import on, work
 import asyncio
 import json
+import datetime as dt
 
 from .client import JSTDataClient
 from .models import Series, Entity, Metric, EntityRelationship
@@ -251,6 +252,26 @@ print(df)"""
         e_ids = [r.id for r in app.basket if isinstance(r, Entity)]
         s_ids = [r.id for r in app.basket if isinstance(r, Series)]
         
+        start_date = (dt.datetime.today() - dt.timedelta(days=1000)).strftime("%Y-%m-%d")
+
+        # this shouldn't be necessary
+        # update api to apply default value if end date/time == None
+        end_date = (dt.datetime.today() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        table.add_row(
+            start_date,
+            "N/A",
+            "N/A",
+            "N/A",
+            "QUERY"
+        )
+        table.add_row(
+            end_date,
+            "N/A",
+            "N/A",
+            "N/A",
+            "QUERY"
+        )
         try:
             observations = await asyncio.to_thread(
                 app.client.query,
@@ -268,8 +289,8 @@ print(df)"""
                 for o in observations:
                     table.add_row(
                         o.observation_timestamp.strftime("%Y-%m-%d"),
-                        getattr(o, "entity_id", "N/A"),
-                        getattr(o, "metric_id", "N/A"),
+                        o.entity_id or "N/A",
+                        o.metric_id or "N/A",
                         f"{o.value:,.4f}",
                         "API"
                     )
