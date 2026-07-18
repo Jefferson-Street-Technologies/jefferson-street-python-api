@@ -237,12 +237,19 @@ def tui():
     app.run()
 
 @cli.command()
-def console():
-    """
-    Launch the new high-density TUI workbench (v2).
-    """
+@click.option(
+    "--session",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    help="Load a saved session state from a JSON file",
+)
+def console(session: str | None) -> None:
+    """Launch the high-density TUI workbench."""
     from .tui import JSTDataApp
-    app = JSTDataApp(client)
+
+    app = JSTDataApp(
+        client,
+        session_path=session,
+    )
     app.run()
 
 if __name__ == "__main__":
