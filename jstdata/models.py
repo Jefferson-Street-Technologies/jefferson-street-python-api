@@ -48,7 +48,7 @@ class Series:
     units: str
     seasonal_adjustment: str
     last_updated: datetime
-    metric_slug: str
+    metric_id: str
     entities: List[Entity] = field(default_factory=list)
 
     @classmethod
@@ -79,7 +79,7 @@ class Series:
                 "seasonal_adjustment", data.get("seasonal_adjsustment", "")
             ),
             last_updated=last_updated,
-            metric_slug=data.get("metric_slug", ""),
+            metric_id=data.get("metric_id", ""),
             entities=entities,
         )
 
@@ -105,8 +105,6 @@ class Observation:
     observation_timestamp: datetime
     release_timestamp: datetime
     value: float
-    entity_id: Optional[str] = None
-    metric_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Observation":
@@ -122,7 +120,28 @@ class Observation:
             series_id=data["series_id"],
             observation_timestamp=obs_ts,
             release_timestamp=rel_ts,
-            value=data["value"],
-            entity_id=data.get("entity_id"),
-            metric_id=data.get("metric_id"),
+            value=data["value"]
+        )
+
+@dataclass(frozen=True)
+class TimeSeries:
+    series: Series
+    observations: List[Observation]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TimeSeries":
+        series = {
+            "id": data.get("id", ""),
+            "label": data.get("label", ""),
+            "frequency": data.get("frequency", ""),
+            "source": data.get("source", ""),
+            "units": data.get("units", ""),
+            "seasonal_adjustment": data.get("seasonal_adjustment", ""),
+            "last_updated": data.get("last_updated", ""),
+            "metric_id": data.get("metric_id", ""),
+            "entities": data.get("entities", []),
+        }
+        return cls(
+            series=Series.from_dict(series),
+            observations=[Observation.from_dict(dict(o, series_id=data["id"])) for o in data["observations"]]
         )

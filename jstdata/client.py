@@ -14,6 +14,7 @@ from .models import (
     Metric,
     Observation,
     Series,
+    TimeSeries
 )
 
 APP_DIR = Path.home() / ".jstdata"
@@ -335,9 +336,8 @@ class JSTDataClient:
         end_date: Optional[str] = None,
         start_time: Optional[int] = None,
         end_time: Optional[int] = None,
-        limit: int = 1000,
-        offset: int = 0,
-    ) -> List[Observation]:
+        order_by: Optional[str] = None
+    ) -> List[TimeSeries]:
         """
         Query for observations. This is the main data extraction method.
         """
@@ -348,8 +348,7 @@ class JSTDataClient:
             "frequency": frequency,
             "start_date": start_date,
             "end_date": end_date,
-            "limit": limit,
-            "offset": offset,
+            "order_by": order_by,
             "start_time": start_time,
             "end_time": end_time
         }
@@ -357,22 +356,8 @@ class JSTDataClient:
         params = {k: v for k, v in params.items() if v is not None}
 
         data = self.make_request("query", params)
-        observations = []
-        for record in data.get("records", []):
-            s_id = record.get("series_id")
-            entities = record.get("entities", [])
-            entity_id = entities[0] if entities else None
-            for obs in record.get("observations", []):
-                obs_data = {
-                    "series_id": s_id,
-                    "observation_timestamp": obs.get("observation_timestamp"),
-                    "release_timestamp": obs.get("release_timestamp"),
-                    "value": obs.get("value"),
-                    "entity_id": entity_id,
-                    "metric_id": None,
-                }
-                observations.append(Observation.from_dict(obs_data))
-        return observations
+        series = [TimeSeries.from_dict(record) for record in data.get("records", [])]
+        return series
 
     def query_df(self, **kwargs) -> pd.DataFrame:
         """

@@ -6,7 +6,7 @@ from textual.binding import Binding
 from textual import on, work
 import asyncio
 import json
-import datetime as dt
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, TypeAlias
 
 from .client import JSTDataClient
@@ -192,32 +192,31 @@ class WorkspaceScreen(Screen):
         self.notify(f"Session saved to {filepath}")
     def load_session(self, filepath: str) -> None:
         """Load basket state from a JSON file."""
-        import json
         try:
             with open(filepath, "r") as f:
                 state = json.load(f)
             
             self.basket.clear()
-            for m_id in state.get("metrics", []):
-                try:
-                    metric = self.client.get_metric(m_id)
-                    self.basket.append(metric)
-                except Exception as e:
-                    self.notify(f"Failed to load metric {m_id}: {e}", severity="warning")
             
-            for e_id in state.get("entities", []):
-                try:
-                    entity = self.client.get_entity(e_id)
-                    self.basket.append(entity)
-                except Exception as e:
-                    self.notify(f"Failed to load entity {e_id}: {e}", severity="warning")
-            
-            for s_id in state.get("series", []):
-                try:
-                    series = self.client.get_series(s_id)
-                    self.basket.append(series)
-                except Exception as e:
-                    self.notify(f"Failed to load series {s_id}: {e}", severity="warning")
+            tasks = {}
+            with ThreadPoolExecutor() as executor:
+                for m_id in state.get("metrics", []):
+                    future = executor.submit(self.client.get_metric, m_id)
+                    tasks[future] = ("metric", m_id)
+                for e_id in state.get("entities", []):
+                    future = executor.submit(self.client.get_entity, e_id)
+                    tasks[future] = ("entity", e_id)
+                for s_id in state.get("series", []):
+                    future = executor.submit(self.client.get_series, s_id)
+                    tasks[future] = ("series", s_id)
+                
+                for future in as_completed(tasks):
+                    item_type, item_id = tasks[future]
+                    try:
+                        result = future.result()
+                        self.basket.append(result)
+                    except Exception as e:
+                        self.notify(f"Failed to load {item_type} {item_id}: {e}", severity="warning")
             
             self._rebuild_basket_list()
             self._update_stats()
@@ -566,7 +565,10 @@ class ExplorerScreen(Screen):
                 
                 yield Label("EXPORT // CLI_COMMAND", classes="sidebar-header")
                 yield Static(id="cli-command-display", classes="code-display")
-                yield Button("COPY CLI", id="copy-cli-btn", variant="primary")
+                yield Button("COPY COMMAND", id="copy-cli-btn", variant="primary")
+                
+                yield Label("EXPORT // CSV", classes="sidebar-header")
+                yield Button("EXPORT TO CSV", id="export-csv-btn", variant="primary")
                 
         with Horizontal(id="explorer-footer"):
             yield Label("RUNNING", id="explorer-status")
@@ -650,41 +652,72 @@ print(df)"""
         self._copy_to_clipboard(self.cli_command)
         self.notify("CLI command copied to clipboard!")
 
+    @on(Button.Pressed, "#export-csv-btn")
+    def export_csv(self) -> None:
+        import csv
+        from datetime import datetime
+        
+        table = self.query_one("#explorer-table", DataTable)
+        headers = [getattr(col.label, "plain", str(col.label)) for col in table.columns.values()]
+        
+        rows = []
+        for row_key in table.rows:
+            rows.append(table.get_row(row_key))
+            
+        if not rows:
+            self.notify("No data to export", severity="warning")
+            return
+            
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"jst_export_{date_str}.csv"
+        
+        try:
+            with open(filename, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                writer.writerows(rows)
+            self.notify(f"Data successfully exported to {filename}")
+        except Exception as e:
+            self.notify(f"Failed to export CSV: {e}", severity="error")
+
     @work(exclusive=True)
     async def run_query(self) -> None:
         table = self.query_one("#explorer-table", DataTable)
         table.clear(columns=True)
-        table.add_columns("DATE", "ENTITY_ID", "METRIC_ID", "VALUE", "SOURCE")
+        table.add_columns("DATE", "LABEL", "VALUE", "UNITS", "SOURCE")
         
         m_ids = [r.id for r in self.basket if isinstance(r, Metric)]
         e_ids = [r.id for r in self.basket if isinstance(r, Entity)]
         s_ids = [r.id for r in self.basket if isinstance(r, Series)]
         
         try:
-            observations = await asyncio.to_thread(
+            time_series_list = await asyncio.to_thread(
                 self.client.query,
                 metric=m_ids or None,
                 entity=e_ids or None,
                 series=s_ids or None,
-                limit=100,
+                order_by='desc'
             )
             
-            if not observations:
+            rcount = 0
+            if not time_series_list:
                 self.notify("No results found", severity="warning")
                 self.query_one("#explorer-status").update("NO RESULTS")
             else:
-                observations = sorted(observations, key=lambda o: o.observation_timestamp)
-                for o in observations:
-                    table.add_row(
-                        o.observation_timestamp.strftime("%Y-%m-%d"),
-                        o.entity_id or "N/A",
-                        o.metric_id or "N/A",
-                        f"{o.value:,.4f}",
-                        "API"
-                    )
-                self.query_one("#explorer-status").update("READY")
+                for t in time_series_list:
+                    observations = t.observations
+                    for o in observations:
+                        table.add_row(
+                            o.observation_timestamp.strftime("%Y-%m-%d"),
+                            t.series.label,
+                            f"{o.value:,.4f}",
+                            t.series.units,
+                            t.series.source
+                        )
+                        rcount += 1
+                    self.query_one("#explorer-status").update("READY")
             
-            self.query_one("#explorer-count").update(f"ROWS: {len(observations)}")
+            self.query_one("#explorer-count").update(f"ROWS: {rcount}")
         except Exception as e:
             self.notify(f"Query error: {e}", severity="error")
             self.query_one("#explorer-status").update("ERROR")
