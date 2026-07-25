@@ -14,7 +14,8 @@ from .models import (
     Metric,
     Observation,
     Series,
-    TimeSeries
+    TimeSeries,
+    Resource,
 )
 
 APP_DIR = Path.home() / ".jstdata"
@@ -358,6 +359,15 @@ class JSTDataClient:
         data = self.make_request("query", params)
         series = [TimeSeries.from_dict(record) for record in data.get("records", [])]
         return series
+
+    def get_resources(self, resource: Union[str, List[str]]) -> List[Resource]:
+        """Get details for a specific metric."""
+        data = self.make_request("resource", params={"resource": resource})
+        records = []
+        for r in data["records"]:
+            records.append(Resource(id=r["id"], label=r["label"]))
+        return records
+
 
     def query_df(self, **kwargs) -> pd.DataFrame:
         """

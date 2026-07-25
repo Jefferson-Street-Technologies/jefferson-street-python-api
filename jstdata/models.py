@@ -38,6 +38,10 @@ class Metric:
     def from_dict(cls, data: Dict[str, Any]) -> "Metric":
         return cls(id=data["id"], name=data.get("name", data.get("label", "")))
 
+@dataclass(frozen=True)
+class Resource:
+    id: str
+    label: str
 
 @dataclass(frozen=True)
 class Series:

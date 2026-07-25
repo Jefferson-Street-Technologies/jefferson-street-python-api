@@ -198,25 +198,8 @@ class WorkspaceScreen(Screen):
             
             self.basket.clear()
             
-            tasks = {}
-            with ThreadPoolExecutor() as executor:
-                for m_id in state.get("metrics", []):
-                    future = executor.submit(self.client.get_metric, m_id)
-                    tasks[future] = ("metric", m_id)
-                for e_id in state.get("entities", []):
-                    future = executor.submit(self.client.get_entity, e_id)
-                    tasks[future] = ("entity", e_id)
-                for s_id in state.get("series", []):
-                    future = executor.submit(self.client.get_series, s_id)
-                    tasks[future] = ("series", s_id)
-                
-                for future in as_completed(tasks):
-                    item_type, item_id = tasks[future]
-                    try:
-                        result = future.result()
-                        self.basket.append(result)
-                    except Exception as e:
-                        self.notify(f"Failed to load {item_type} {item_id}: {e}", severity="warning")
+            resources = state.get("metrics", []) + state.get("entities", []) + state.get("series", [])
+            self.basket.extend(self.client.get_resources(resources))
             
             self._rebuild_basket_list()
             self._update_stats()
